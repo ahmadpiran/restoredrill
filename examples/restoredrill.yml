@@ -1,0 +1,79 @@
+# restoredrill: example configuration
+# Run: restoredrill --config restoredrill.yml
+
+backup:
+  # Local path, file:// URL, or s3:// URL. An s3:// source ending in "/" is a
+  # prefix: the newest object under it is drilled (requires the aws CLI),
+  # verified by content when the format supports it (see s3_object_pattern).
+  source: s3://my-backups/postgres/daily/
+  # pg_dump_custom for pg_dump -Fc archives, pg_dump_sql for plain SQL dumps.
+  format: pg_dump_custom
+  # Glob to filter S3 prefix candidates (e.g. "*.dump"), so a checksum or
+  # metadata sidecar can't be picked over the real backup. Optional for
+  # pg_dump_custom (content is verified directly); required for pg_dump_sql
+  # with a prefix source, since plain SQL has no content signature to check.
+  # s3_object_pattern: "*.dump"
+
+postgres:
+  # Match your production major version.
+  image: postgres:16
+
+sandbox:
+  # never (default) | on-failure | always: keep the restored container
+  # running for human inspection instead of tearing it down.
+  keep: on-failure
+
+checks:
+  # --- prechecks (run before the restore) ---
+  # Fail if the backup file is suspiciously small. Unset (0) gets a tiny
+  # built-in default floor that only catches literally-empty files; set a
+  # real threshold for your database, or -1 to disable the floor entirely.
+  min_size_bytes: 1048576
+  # Validate the dump's table of contents before restoring (default: true).
+  # pg_dump_custom only: plain SQL dumps have no inspectable header, so
+  # this precheck can't have an equivalent for pg_dump_sql.
+  archive_integrity: true
+  # RPO target: the backup being drilled must be no older than this,
+  # measured from its own timestamp to drill start. Fails closed if the
+  # timestamp can't be determined; also catches a backup cron that
+  # silently died, leaving a stale file in place.
+  rpo_target: 48h
+
+  # --- structural ---
+  # Fail if fewer than this many user tables exist after restore.
+  min_tables: 5
+  # Fail if any serial/identity sequence lags behind its column's max value
+  # (broken sequences only surface on the first INSERT after a disaster).
+  sequence_integrity: true
+  # RTO target: the measured restore duration must be at or under this.
+  # Optional; omit it if you don't want restore speed to gate pass/fail.
+  rto_target: 30m
+
+  # --- read-path ---
+  # Fail if these tables have fewer rows than expected.
+  row_counts:
+    - table: users
+      min: 100
+    - table: orders
+      min: 1000
+  # Your own assertions: each query must return exactly one row with a
+  # single boolean value. A check that errors is a FAILURE, not a skip.
+  queries:
+    - name: orders reference valid users
+      sql: "SELECT NOT EXISTS (SELECT 1 FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE u.id IS NULL)"
+    - name: data is fresh (backup younger than 48h)
+      sql: "SELECT max(created_at) > now() - interval '48 hours' FROM orders"
+
+notify:
+  # Full JSON report, POSTed after every drill.
+  # webhook_url: https://example.com/hooks/restoredrill
+  # Short text summary to a Slack incoming webhook.
+  # slack_webhook_url: https://hooks.slack.com/services/T000/B000/XXXX
+
+output:
+  # node_exporter textfile-collector metrics. Alert on the age of
+  # restoredrill_last_run_timestamp_seconds to catch silently stopped drills.
+  # prometheus_textfile: /var/lib/node_exporter/textfile/restoredrill.prom
+
+report:
+  path: restoredrill-report.json

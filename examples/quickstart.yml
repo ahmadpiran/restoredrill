@@ -1,0 +1,20 @@
+# restoredrill: minimal local quickstart.
+# Point this at a plain pg_dump of any Postgres database (Supabase, RDS,
+# your laptop, whatever) and run:
+#
+#   restoredrill --config quickstart.yml --trigger manual
+#
+# No S3, no CI, no production access required, just a dump file and Docker.
+
+backup:
+  source: ./backup.dump
+  format: pg_dump_custom
+
+postgres:
+  image: postgres:16
+
+checks:
+  min_tables: 1
+
+report:
+  path: restoredrill-report.json

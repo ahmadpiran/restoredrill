@@ -1,0 +1,15 @@
+# Compiled binary
+/restoredrill
+/restoredrill.exe
+
+# Build artifacts
+/dist/
+
+# Local test/dev artifacts
+*.log
+restoredrill-report.json
+*.prom
+
+# OS cruft
+.DS_Store
+Thumbs.db

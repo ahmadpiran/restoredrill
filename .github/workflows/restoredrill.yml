@@ -1,0 +1,32 @@
+# Example workflow for using restoredrill in your own repository.
+#
+# This file lives in restoredrill's own repo as a working reference, not as
+# restoredrill's own CI job; there's no real backup source configured here.
+# To use it in your project: copy this file, add a restoredrill.yml (see
+# examples/), and set any credentials your backup.source needs (e.g. AWS_*
+# secrets for an s3:// source) as repository/environment secrets.
+#
+# Left as workflow_dispatch-only (no `schedule:` trigger) so copying this
+# file doesn't silently start firing against a config that isn't real yet.
+# Add `schedule: - cron: '...'` once you've pointed it at an actual backup.
+name: Restore drill
+
+on:
+  workflow_dispatch:
+    inputs:
+      triggered_by:
+        description: 'Who is running this manually (optional, defaults to the GitHub actor)'
+        required: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run restoredrill
+        uses: ./
+        with:
+          config: restoredrill.yml
+          trigger: manual
+          triggered-by: ${{ github.event.inputs.triggered_by || github.actor }}

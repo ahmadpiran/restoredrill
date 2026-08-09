@@ -1,0 +1,77 @@
+name: 'restoredrill'
+description: 'Run a restoredrill PostgreSQL restore drill and produce a JSON evidence report.'
+author: 'restoredrill'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  config:
+    description: 'Path to the restoredrill config file.'
+    required: false
+    default: 'restoredrill.yml'
+  version:
+    description: 'restoredrill version to install: a git tag (e.g. "v0.2.0"), or "latest".'
+    required: false
+    default: 'latest'
+  trigger:
+    description: 'How this drill was triggered: "scheduled" or "manual".'
+    required: false
+    default: 'scheduled'
+  triggered-by:
+    description: 'Who triggered this drill (recorded on the report; matters for manual runs).'
+    required: false
+    default: ''
+  report-path:
+    description: 'Where the report is written; must match report.path in your config.'
+    required: false
+    default: 'restoredrill-report.json'
+  report-artifact-name:
+    description: 'Name for the uploaded report artifact. Set to empty to skip uploading.'
+    required: false
+    default: 'restoredrill-report'
+
+outputs:
+  report-path:
+    description: 'Path to the JSON evidence report produced by this run.'
+    value: ${{ inputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    - name: Configure Go for private module access
+      shell: bash
+      run: |
+        set -euo pipefail
+        git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+        echo "GOPRIVATE=github.com/ahmadpiran/restoredrill" >> "$GITHUB_ENV"
+
+    - name: Install restoredrill
+      shell: bash
+      run: |
+        set -euo pipefail
+        go install "github.com/ahmadpiran/restoredrill/cmd/restoredrill@${{ inputs.version }}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    - name: Run restoredrill
+      shell: bash
+      run: |
+        set -euo pipefail
+        args=(--config "${{ inputs.config }}" --trigger "${{ inputs.trigger }}")
+        if [ -n "${{ inputs.triggered-by }}" ]; then
+          args+=(--triggered-by "${{ inputs.triggered-by }}")
+        fi
+        restoredrill "${args[@]}"
+
+    - name: Upload evidence report
+      if: always() && inputs.report-artifact-name != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.report-artifact-name }}
+        path: ${{ inputs.report-path }}
+        if-no-files-found: error
