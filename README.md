@@ -14,6 +14,14 @@ A policy doc is easy to fake, on purpose or by accident. "We test quarterly" cou
 
 If you're doing SOC 2, ISO 27001, or an AWS Foundational Technical Review, this is the shape of evidence they ask for: real logs from real restores, tied to what ran and when.
 
+## How this differs
+
+There are other tools in this space. Worth naming plainly instead of pretending they don't exist.
+
+[Databasus](https://github.com/databasus/databasus) is a solid self-hosted backup platform for Postgres, MySQL, MariaDB, and MongoDB, with a full web UI and a restore-verification feature built in. If you want one dashboard to manage backups across several database engines, look there first. [BackupDrill](https://backupdrill.com) does something close to this for Supabase specifically, including Storage files.
+
+restoredrill isn't trying to be either of those. It's a single-purpose, CI-native check that produces a report shaped for an auditor, not a dashboard: fail-closed on everything, an RPO freshness precheck, your own SQL assertions, RTO tracked against a target, and every field always present so it copies cleanly into a SOC 2, ISO 27001, or AWS FTR evidence packet. If you already have a backup tool and just need proof it restores, on a schedule, in a form an auditor accepts, this is built for exactly that gap.
+
 ## Quickstart: ten minutes, no production access
 
 The usual excuse for not testing restores is "there's nowhere safe to do it." There is: a throwaway container on your own laptop.
