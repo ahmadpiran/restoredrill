@@ -6,13 +6,13 @@
 
 ## Why
 
-Everyone knows they should test restores. Almost nobody does, because there's nowhere safe to restore to and never enough time. Teams that automate it usually hand-roll a cron job and a script, and those fail quietly: the drill stops running, or starts restoring the same stale file, and nobody notices for a month.
+Everyone knows they should test restores. Almost nobody does, because there's nowhere safe to do it and never enough time. Scripts and cron jobs don't really fix this either, they fail quietly too: the job stops running, or keeps looping on stale data, and nobody gets told.
 
-restoredrill makes the drill a one-command habit and makes skipping it loud. It runs on whatever schedule your recovery policy sets, not continuously. A lot of GRC advice actively warns against continuous claims, since any gap becomes an audit finding. This proves you did what you said you'd do, on schedule.
+restoredrill turns the restore drill into one command, and makes it loud if you skip it. It runs on whatever schedule your recovery policy sets, not constantly, since most compliance frameworks actually warn against claiming continuous testing, any gap becomes a finding. You get real proof you did what you said, when you said you'd do it.
 
-A policy doc is easy to fake, on purpose or by accident. "We test quarterly" could have been written last week with nothing actually run in a year. A timestamped, machine-generated report is harder to fake.
+A policy doc is easy to fake, on purpose or by accident. Someone can write "we test quarterly" today even if nobody's run a test in a year. A report with a real timestamp, made by the tool itself, is much harder to fake.
 
-If you're doing SOC 2, ISO 27001, or an AWS Foundational Technical Review, this is the shape of evidence they ask for: real logs from real restores, tied to what ran and when.
+If you're doing SOC 2, ISO 27001, or an AWS Foundational Technical Review, this is the kind of proof they want: real logs from real restores, showing what ran and when.
 
 ## How this differs
 
@@ -20,11 +20,11 @@ There are other tools in this space.
 
 [Databasus](https://github.com/databasus/databasus) is a solid self-hosted backup platform for Postgres, MySQL, MariaDB, and MongoDB, with a full web UI and restore verification built in. If you want one dashboard managing backups across several database engines, start there. [BackupDrill](https://backupdrill.com) does something close to this for Supabase specifically, including Storage files.
 
-restoredrill does one narrow thing: a CI-native check that produces a report shaped for an auditor, not a dashboard. Fail-closed everywhere, an RPO freshness precheck, your own SQL assertions, RTO tracked against a target, every field always present so it copies cleanly into a SOC 2, ISO 27001, or AWS FTR evidence packet. If you already have a backup tool and just need proof it restores on a schedule, this is that.
+restoredrill does one thing: a CI-native check built for an auditor's report, not a dashboard. Fail-closed by default, an RPO freshness check, your own SQL assertions, RTO tracked against a target, and every field formatted the same way so it copies cleanly into a SOC 2, ISO 27001, or AWS FTR packet. If your backups are handled and you just need proof they work on schedule, this is that.
 
 ## Quickstart: ten minutes, no production access
 
-The usual excuse for not testing restores is "there's nowhere safe to do it." There is: a throwaway container on your own laptop.
+Most people who skip testing restores say there's nowhere safe to do it. A throwaway container on your own laptop works fine.
 
 1. Dump whatever Postgres you have. Supabase, RDS, your local dev box, doesn't matter:
 
@@ -47,9 +47,9 @@ That's it. No S3, no CI, no production credentials. You now have a JSON file pro
 
 Checks run in tiers. Every check is fail-closed: if a check can't run, that counts as a failure, not a skip.
 
-1. **Prechecks**, before the restore even starts: is the backup file big enough, is its archive header readable, and is it actually recent (the RPO check). This catches a backup cron that died quietly and left the same stale file in place.
-2. **Structural**: did the restore finish, are enough tables there, and are sequences in sync with their tables. A sequence that lags its column's max value only shows up on the first INSERT after a real disaster. restoredrill catches it now instead.
-3. **Read-path**: row counts, data freshness, and any SQL assertions you write. A restore can exit 0 and still be lying until someone actually reads the data. One real incident: a restore process exited clean while the database behind it was silently corrupted. That's what these checks are for.
+1. **Prechecks**, before the restore even starts: is the backup file big enough, is its archive header readable, and is it actually recent (the RPO check). 
+2. **Structural**: did the restore finish, are enough tables there, and are sequences in sync with their tables. 
+3. **Read-path**: row counts, data freshness, and any SQL assertions you write. A restore can exit 0 and still be lying until someone actually reads the data. 
 4. **RTO evidence**: how long the restore actually took, checked against a target if you set one.
 5. **Environment sanity**: the container has to come up and accept connections at all, which also proves the recovery environment has enough room to work.
 
@@ -68,9 +68,9 @@ Every field is always present, never missing just because it doesn't apply. Audi
 - `notify_errors`: a broken Slack or webhook URL is a finding, not a silent no-op. If a notify sink fails to deliver, it shows up here, and the process exits non-zero, even if the drill itself passed.
 - All timestamps are a literal `"YYYY-MM-DD HH:MM:SS UTC"` string, not epoch or RFC3339. Most auditor workflows end in copy-pasting into a spreadsheet, and this format survives that.
 
-The JSON report stays inspectable down to what actually ran. No polished PDF summary asking you, or your auditor, to just trust it.
+The JSON report stays inspectable down to what actually ran, nothing polished standing between you and the real logs.
 
-Whether your restore is getting slower over time isn't something one report can show on its own. That's a job for whatever you feed these reports into: a log aggregator, a dashboard, even a spreadsheet. Every report includes `restore_duration_seconds` so that's easy to chart.
+One report can't show you if restores are slowly getting slower over time. That's a job for whatever you feed these reports into, a log tool, a dashboard, even a spreadsheet. Every report includes `restore_duration_seconds` so that's easy to chart.
 
 ## Requirements
 
@@ -85,7 +85,7 @@ restoredrill sends results into tools you already watch:
 - **Slack**: `notify.slack_webhook_url` gets a one-line PASS/FAIL summary with the failed checks listed.
 - **Anything else**: `notify.webhook_url` gets the full JSON report via POST.
 
-A failed delivery to any of these shows up in `notify_errors`, and the process exits non-zero too: a notification failing silently is the same problem, one layer up.
+If a notification fails to reach any of these, it shows up in `notify_errors`, and the process exits non-zero too. A notification failing silently is the same problem, just one step further up.
 
 ## CI usage
 
@@ -98,6 +98,7 @@ The exit code makes this a natural scheduled CI job. See [`.github/workflows/res
 - The archive integrity precheck only works for `pg_dump_custom`. Plain SQL dumps have no table-of-contents header to check, so there's no equivalent precheck for that format. That's a real gap, not an oversight: `pg_dump_sql` corruption gets caught later, and more expensively, at restore time instead.
 - The same gap applies to picking the right file from an S3 prefix. restoredrill can check a candidate's content for `pg_dump_custom` (it looks for the `PGDMP` header), but plain SQL has no such signature. `backup.s3_object_pattern` is required when you combine a prefix source with `pg_dump_sql`. restoredrill fails at config load instead of guessing which file is the real backup.
 - We don't cite specific SOC 2 or ISO 27001 clause numbers here. The report is built around what the underlying control actually asks for (documented, provable recovery testing on whatever cadence your policy sets), but getting a compliance citation wrong is worse than not citing one. Check your own control language and auditor instead of trusting a clause number from us.
+- The restore runs `pg_restore` with `--no-owner --no-privileges`, so it doesn't fail when the dump references a role that doesn't exist in the throwaway container. That also means role and grant integrity is never actually verified: every check runs as the connecting superuser, so a missing application role, or a grant that was never captured in the backup, won't show up as a failure the way it would in a real recovery. This is a real gap, not fixed yet.
 
 ## Roadmap
 
