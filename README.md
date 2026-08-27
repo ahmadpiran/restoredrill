@@ -6,9 +6,9 @@
 
 ## Why
 
-Everyone knows they should test restores. Almost nobody does, because there's nowhere safe to restore to and never enough time. Teams that automate it usually hand-roll a cron job and a script, and those fail quietly in their own way. The real danger isn't a bad backup. It's the drill silently not running, or silently restoring a stale file, and nobody noticing for a month.
+Everyone knows they should test restores. Almost nobody does, because there's nowhere safe to restore to and never enough time. Teams that automate it usually hand-roll a cron job and a script, and those fail quietly: the drill stops running, or starts restoring the same stale file, and nobody notices for a month.
 
-restoredrill makes the drill a one-command habit, and makes skipping it loud. It runs on whatever schedule your recovery policy sets. It doesn't assume you need to test constantly (a lot of GRC advice actually warns against that, since any gap in a "continuous" claim becomes an audit finding). It just proves you did what you said you'd do, on schedule.
+restoredrill makes the drill a one-command habit and makes skipping it loud. It runs on whatever schedule your recovery policy sets, not continuously. A lot of GRC advice actively warns against continuous claims, since any gap becomes an audit finding. This proves you did what you said you'd do, on schedule.
 
 A policy doc is easy to fake, on purpose or by accident. "We test quarterly" could have been written last week with nothing actually run in a year. A timestamped, machine-generated report is harder to fake.
 
@@ -16,11 +16,11 @@ If you're doing SOC 2, ISO 27001, or an AWS Foundational Technical Review, this 
 
 ## How this differs
 
-There are other tools in this space. Worth naming plainly instead of pretending they don't exist.
+There are other tools in this space.
 
-[Databasus](https://github.com/databasus/databasus) is a solid self-hosted backup platform for Postgres, MySQL, MariaDB, and MongoDB, with a full web UI and a restore-verification feature built in. If you want one dashboard to manage backups across several database engines, look there first. [BackupDrill](https://backupdrill.com) does something close to this for Supabase specifically, including Storage files.
+[Databasus](https://github.com/databasus/databasus) is a solid self-hosted backup platform for Postgres, MySQL, MariaDB, and MongoDB, with a full web UI and restore verification built in. If you want one dashboard managing backups across several database engines, start there. [BackupDrill](https://backupdrill.com) does something close to this for Supabase specifically, including Storage files.
 
-restoredrill isn't trying to be either of those. It's a single-purpose, CI-native check that produces a report shaped for an auditor, not a dashboard: fail-closed on everything, an RPO freshness precheck, your own SQL assertions, RTO tracked against a target, and every field always present so it copies cleanly into a SOC 2, ISO 27001, or AWS FTR evidence packet. If you already have a backup tool and just need proof it restores, on a schedule, in a form an auditor accepts, this is built for exactly that gap.
+restoredrill does one narrow thing: a CI-native check that produces a report shaped for an auditor, not a dashboard. Fail-closed everywhere, an RPO freshness precheck, your own SQL assertions, RTO tracked against a target, every field always present so it copies cleanly into a SOC 2, ISO 27001, or AWS FTR evidence packet. If you already have a backup tool and just need proof it restores on a schedule, this is that.
 
 ## Quickstart: ten minutes, no production access
 
@@ -79,19 +79,19 @@ Whether your restore is getting slower over time isn't something one report can 
 
 ## Alerting: no new dashboard
 
-restoredrill sends results into what you already watch, instead of asking you to check somewhere new:
+restoredrill sends results into tools you already watch:
 
 - **Prometheus**: `output.prometheus_textfile` writes node_exporter textfile metrics. Alert on the age of `restoredrill_last_run_timestamp_seconds`. That's your "verified within N hours" signal, and it catches a drill that quietly stopped running.
 - **Slack**: `notify.slack_webhook_url` gets a one-line PASS/FAIL summary with the failed checks listed.
 - **Anything else**: `notify.webhook_url` gets the full JSON report via POST.
 
-A failed delivery to any of these shows up in `notify_errors` and makes the process exit non-zero. Losing your only notification channel silently is exactly the kind of quiet failure this tool exists to catch.
+A failed delivery to any of these shows up in `notify_errors`, and the process exits non-zero too: a notification failing silently is the same problem, one layer up.
 
 ## CI usage
 
 The exit code makes this a natural scheduled CI job. See [`.github/workflows/restoredrill.yml`](.github/workflows/restoredrill.yml) for a working example, or use [`action.yml`](action.yml) directly in your own workflow. Pass `--trigger manual` (and `--triggered-by`) when a person runs it by hand instead. The evidence output looks the same either way.
 
-## Honest limits
+## Limits
 
 - The ephemeral-container model assumes your database fits comfortably in a container on the runner. Multi-terabyte estates need a different approach (restore to dedicated infra). restoredrill isn't that today.
 - `pg_dump`-level verification doesn't exercise PITR or WAL replay. pgBackRest support, which does, is on the roadmap.
