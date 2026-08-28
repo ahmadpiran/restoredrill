@@ -50,6 +50,20 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		rep.BackupCandidatesConsidered = append(rep.BackupCandidatesConsidered, report.BackupCandidate{Name: c.Name, Reason: c.Reason})
 	}
 
+	var gfr fetchResult
+	if cfg.Backup.GlobalsSource != "" {
+		gfr, err = fetchExact(cfg.Backup.GlobalsSource)
+		if err != nil {
+			return fail(rep, cfg.Checks, fmt.Errorf("fetching globals: %w", err))
+		}
+		if gfr.cleanup != nil {
+			defer gfr.cleanup()
+		}
+		if _, err := os.Stat(gfr.localPath); err != nil {
+			return fail(rep, cfg.Checks, fmt.Errorf("globals file not found: %w", err))
+		}
+	}
+
 	fi, err := os.Stat(fr.localPath)
 	if err != nil {
 		return fail(rep, cfg.Checks, fmt.Errorf("backup not found: %w", err))
@@ -141,13 +155,6 @@ func Run(cfg *config.Config) (*report.Report, error) {
 	}
 
 	if cfg.Backup.GlobalsSource != "" {
-		gfr, err := fetchExact(cfg.Backup.GlobalsSource)
-		if err != nil {
-			return fail(rep, cfg.Checks, fmt.Errorf("fetching globals: %w", err))
-		}
-		if gfr.cleanup != nil {
-			defer gfr.cleanup()
-		}
 		const remoteGlobals = "/tmp/restoredrill-globals.sql"
 		res := report.CheckResult{Name: "precheck: globals restored (roles/grants available)"}
 		if err := sb.copyIn(gfr.localPath, remoteGlobals); err != nil {
