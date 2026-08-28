@@ -647,11 +647,16 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 	for _, rc := range cfg.RowCounts {
 		out, err := sb.queryAs(cfg.VerifyAsRole, "SELECT count(*) FROM "+quoteIdent(rc.Table))
 		n, _ := strconv.ParseInt(out, 10, 64)
-		results = append(results, report.CheckResult{
-			Name:    fmt.Sprintf("%s has at least %d rows", rc.Table, rc.Min),
-			Passed:  err == nil && n >= rc.Min,
-			Details: "found " + out,
-		})
+		res := report.CheckResult{
+			Name:   fmt.Sprintf("%s has at least %d rows", rc.Table, rc.Min),
+			Passed: err == nil && n >= rc.Min,
+		}
+		if err != nil {
+			res.Details = "query failed: " + firstLine(out)
+		} else {
+			res.Details = "found " + out
+		}
+		results = append(results, res)
 	}
 
 	for _, q := range cfg.Queries {
