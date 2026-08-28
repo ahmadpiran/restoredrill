@@ -11,17 +11,25 @@ import (
 type Format struct {
 	// Sniff reports whether head looks like this format. Nil if the
 	// format has no reliable signature (e.g. plain SQL has no header).
-	Sniff func(head []byte) bool
+	Sniff   func(head []byte) bool
+	Trailer func(tail []byte) bool
 }
 
 var known = map[string]Format{
 	"pg_dump_custom": {Sniff: sniffPgDumpCustom},
-	"pg_dump_sql":    {},
+	"pg_dump_sql":    {Trailer: trailerPgDumpSQL},
 }
 
 // pg_dump -Fc archives start with "PGDMP".
 func sniffPgDumpCustom(head []byte) bool {
 	return bytes.HasPrefix(head, []byte("PGDMP"))
+}
+
+// Newer Postgres appends a per-dump random token after this, so match the marker, not a suffix.
+const pgDumpSQLTrailerMarker = "-- PostgreSQL database dump complete"
+
+func trailerPgDumpSQL(tail []byte) bool {
+	return bytes.Contains(tail, []byte(pgDumpSQLTrailerMarker))
 }
 
 func Valid(name string) bool {
@@ -49,4 +57,14 @@ func Sniffable(name string) bool {
 func Matches(name string, head []byte) bool {
 	f, ok := known[name]
 	return ok && f.Sniff != nil && f.Sniff(head)
+}
+
+func Trailerable(name string) bool {
+	f, ok := known[name]
+	return ok && f.Trailer != nil
+}
+
+func Complete(name string, tail []byte) bool {
+	f, ok := known[name]
+	return ok && f.Trailer != nil && f.Trailer(tail)
 }

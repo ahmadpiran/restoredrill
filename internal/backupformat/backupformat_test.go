@@ -44,6 +44,54 @@ func TestMatchesUnsniffableFormatAlwaysFalse(t *testing.T) {
 	}
 }
 
+func TestTrailerable(t *testing.T) {
+	if Trailerable("pg_dump_custom") {
+		t.Error("expected pg_dump_custom to be untrailerable (has its own TOC check)")
+	}
+	if !Trailerable("pg_dump_sql") {
+		t.Error("expected pg_dump_sql to be trailerable")
+	}
+	if Trailerable("mysql_dump") {
+		t.Error("expected an unknown format to be untrailerable")
+	}
+}
+
+const realPgDumpSQLTail = `
+COPY public.t (id) FROM stdin;
+1
+\.
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict 9XvOA8PlNswAqIrk1QzL28jR2GSMpmeHoLcKEO78pGLAubSE6BapqImO2sn6tg0
+
+`
+
+func TestCompletePgDumpSQL(t *testing.T) {
+	if !Complete("pg_dump_sql", []byte(realPgDumpSQLTail)) {
+		t.Error("expected a real pg_dump plain-SQL trailer to be complete")
+	}
+	truncated := "COPY public.t (id) FROM stdin;\n1\n2\n3\n4\n5\n"
+	if Complete("pg_dump_sql", []byte(truncated)) {
+		t.Error("expected a truncated dump (no trailer) to be incomplete")
+	}
+	if Complete("pg_dump_sql", []byte("")) {
+		t.Error("expected an empty tail to be incomplete")
+	}
+}
+
+func TestCompleteUnsupportedFormatAlwaysFalse(t *testing.T) {
+	if Complete("pg_dump_custom", []byte(realPgDumpSQLTail)) {
+		t.Error("expected Complete to return false for a format with no trailer check")
+	}
+	if Complete("mysql_dump", []byte(realPgDumpSQLTail)) {
+		t.Error("expected Complete to return false for an unknown format")
+	}
+}
+
 func TestNamesSortedAndComplete(t *testing.T) {
 	names := Names()
 	want := []string{"pg_dump_custom", "pg_dump_sql"}
