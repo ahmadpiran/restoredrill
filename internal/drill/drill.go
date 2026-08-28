@@ -95,6 +95,24 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		}
 	}
 
+	if cfg.Backup.Format == "pg_dump_sql" &&
+		(cfg.Checks.ArchiveIntegrity == nil || *cfg.Checks.ArchiveIntegrity) {
+		tail, terr := readTail(fr.localPath, tailReadBytes)
+		complete := terr == nil && backupformat.Complete(cfg.Backup.Format, tail)
+		res := report.CheckResult{Name: "precheck: dump file complete (trailer present)", Passed: complete}
+		if !complete {
+			if terr != nil {
+				res.Details = terr.Error()
+			} else {
+				res.Details = "no completion trailer found in file tail"
+			}
+		}
+		rep.Checks = append(rep.Checks, res)
+		if !complete {
+			return fail(rep, cfg.Checks, fmt.Errorf("dump completeness check failed: %s", res.Details))
+		}
+	}
+
 	sb := newSandbox(cfg.Postgres.Image)
 	keep := false
 	// Registered before sb.start() so a readiness timeout still cleans up.
@@ -126,8 +144,6 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		return fail(rep, cfg.Checks, err)
 	}
 
-	// Validates the dump's TOC before restoring. pg_dump_sql has no header,
-	// so this precheck is pg_dump_custom-only by necessity.
 	if cfg.Backup.Format == "pg_dump_custom" &&
 		(cfg.Checks.ArchiveIntegrity == nil || *cfg.Checks.ArchiveIntegrity) {
 		out, err := sb.exec("pg_restore", "--list", remote)
@@ -340,6 +356,10 @@ const maxS3PrefixCandidates = 5
 // sniffHeadBytes is how much of a candidate is read to check its signature.
 const sniffHeadBytes = 16
 
+// tailReadBytes covers the trailer comment block plus a trailing
+// \unrestrict token line, with margin.
+const tailReadBytes = 512
+
 // fetchS3Prefix walks objects under a prefix newest-first, skipping any
 // that don't match S3ObjectPattern and, for sniffable formats, any that
 // don't look like the configured format. Unsniffable formats accept the
@@ -440,6 +460,27 @@ func readHead(path string, n int) ([]byte, error) {
 		return nil, err
 	}
 	return buf[:m], nil
+}
+
+// readTail reads up to the last n bytes of the file at path.
+func readTail(path string, n int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() < int64(n) {
+		n = int(fi.Size())
+	}
+	buf := make([]byte, n)
+	if _, err := f.ReadAt(buf, fi.Size()-int64(n)); err != nil && err != io.EOF {
+		return nil, err
+	}
+	return buf, nil
 }
 
 func restore(sb *sandbox, format, remote string) error {
