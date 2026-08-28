@@ -71,7 +71,21 @@ func (s *sandbox) exec(args ...string) (string, error) {
 
 // query runs SQL against the restored database and returns the trimmed result.
 func (s *sandbox) query(sql string) (string, error) {
-	out, err := s.exec("psql", "-U", "postgres", "-d", "postgres", "-tAc", sql)
+	return s.queryAs("", sql)
+}
+
+// queryAs prefixes sql with "SET ROLE role" so it runs as role instead of
+// postgres (a superuser can SET ROLE without a membership check). -q
+// suppresses the "SET" status line psql would otherwise print ahead of the
+// result, even under -t.
+func (s *sandbox) queryAs(role, sql string) (string, error) {
+	args := []string{"-U", "postgres", "-d", "postgres", "-t", "-A"}
+	if role != "" {
+		args = append(args, "-q")
+		sql = fmt.Sprintf("SET ROLE %s; %s", quoteIdent(role), sql)
+	}
+	args = append(args, "-c", sql)
+	out, err := s.exec(append([]string{"psql"}, args...)...)
 	return strings.TrimSpace(out), err
 }
 

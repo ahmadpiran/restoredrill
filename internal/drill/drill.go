@@ -614,7 +614,7 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 	}
 
 	for _, rc := range cfg.RowCounts {
-		out, err := sb.query("SELECT count(*) FROM " + quoteIdent(rc.Table))
+		out, err := sb.queryAs(cfg.VerifyAsRole, "SELECT count(*) FROM "+quoteIdent(rc.Table))
 		n, _ := strconv.ParseInt(out, 10, 64)
 		results = append(results, report.CheckResult{
 			Name:    fmt.Sprintf("%s has at least %d rows", rc.Table, rc.Min),
@@ -624,15 +624,16 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 	}
 
 	for _, q := range cfg.Queries {
-		results = append(results, runAssertion(sb, q))
+		results = append(results, runAssertion(sb, cfg.VerifyAsRole, q))
 	}
 
 	return results
 }
 
-// runAssertion runs a user-defined SQL assertion against the sandbox.
-func runAssertion(sb *sandbox, q config.Assertion) report.CheckResult {
-	out, err := sb.query(q.SQL)
+// runAssertion runs a user-defined SQL assertion against the sandbox, as
+// role if set (see queryAs).
+func runAssertion(sb *sandbox, role string, q config.Assertion) report.CheckResult {
+	out, err := sb.queryAs(role, q.SQL)
 	return evaluateAssertion(q.Name, out, err)
 }
 
