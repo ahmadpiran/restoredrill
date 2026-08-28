@@ -163,6 +163,23 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		if !res.Passed {
 			return fail(rep, cfg.Checks, fmt.Errorf("globals restore failed: %s", res.Details))
 		}
+
+		if cfg.Checks.VerifyAsRole != "" {
+			roleRes := report.CheckResult{Name: "precheck: verify_as_role exists"}
+			exists, err := roleExists(sb, cfg.Checks.VerifyAsRole)
+			switch {
+			case err != nil:
+				roleRes.Details = firstLine(err.Error())
+			case !exists:
+				roleRes.Details = fmt.Sprintf("role %q not found in the sandbox after globals restore; check backup.globals_source contains it", cfg.Checks.VerifyAsRole)
+			default:
+				roleRes.Passed = true
+			}
+			rep.Checks = append(rep.Checks, roleRes)
+			if !roleRes.Passed {
+				return fail(rep, cfg.Checks, fmt.Errorf("verify_as_role check failed: %s", roleRes.Details))
+			}
+		}
 	}
 
 	const remote = "/tmp/restoredrill-backup"
@@ -541,6 +558,15 @@ func unexpectedGlobalsErrors(output string) []string {
 		bad = append(bad, strings.TrimSpace(line))
 	}
 	return bad
+}
+
+func roleExists(sb *sandbox, role string) (bool, error) {
+	out, err := sb.query("SELECT 1 FROM pg_roles WHERE rolname = " + quoteLiteral(role))
+	return out == "1", err
+}
+
+func quoteLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func restore(sb *sandbox, format, remote string, preserveOwnership bool) error {
