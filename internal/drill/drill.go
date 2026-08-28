@@ -27,6 +27,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		Version:       buildinfo.Version,
 		StartedAt:     report.Now(),
 		BackupSource:  cfg.Backup.Source,
+		GlobalsSource: cfg.Backup.GlobalsSource,
 		PostgresImage: cfg.Postgres.Image,
 	}
 	defer func() { rep.FinishedAt = report.Now() }()
@@ -139,6 +140,31 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		return fail(rep, cfg.Checks, err)
 	}
 
+	if cfg.Backup.GlobalsSource != "" {
+		gfr, err := fetchExact(cfg.Backup.GlobalsSource)
+		if err != nil {
+			return fail(rep, cfg.Checks, fmt.Errorf("fetching globals: %w", err))
+		}
+		if gfr.cleanup != nil {
+			defer gfr.cleanup()
+		}
+		const remoteGlobals = "/tmp/restoredrill-globals.sql"
+		res := report.CheckResult{Name: "precheck: globals restored (roles/grants available)"}
+		if err := sb.copyIn(gfr.localPath, remoteGlobals); err != nil {
+			res.Details = err.Error()
+		} else if out, err := sb.exec("psql", "-U", "postgres", "-d", "postgres", "-f", remoteGlobals); err != nil {
+			res.Details = firstLine(out)
+		} else if bad := unexpectedGlobalsErrors(out); len(bad) > 0 {
+			res.Details = strings.Join(bad, "; ")
+		} else {
+			res.Passed = true
+		}
+		rep.Checks = append(rep.Checks, res)
+		if !res.Passed {
+			return fail(rep, cfg.Checks, fmt.Errorf("globals restore failed: %s", res.Details))
+		}
+	}
+
 	const remote = "/tmp/restoredrill-backup"
 	if err := sb.copyIn(fr.localPath, remote); err != nil {
 		return fail(rep, cfg.Checks, err)
@@ -159,7 +185,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 
 	rep.RestoreStartedAt = report.Now()
 	restoreStart := time.Now()
-	if err := restore(sb, cfg.Backup.Format, remote); err != nil {
+	if err := restore(sb, cfg.Backup.Format, remote, cfg.Backup.GlobalsSource != ""); err != nil {
 		return fail(rep, cfg.Checks, fmt.Errorf("restore failed: %w", err))
 	}
 	rep.RestoreDurationSeconds = time.Since(restoreStart).Seconds()
@@ -263,6 +289,23 @@ func fetch(b config.Backup) (fetchResult, error) {
 		return fetchResult{localPath: local, resolvedKey: local}, nil
 	default:
 		return fetchResult{localPath: b.Source, resolvedKey: b.Source}, nil
+	}
+}
+
+// fetchExact resolves a globals_source: like fetch, but no S3 prefix/newest-object selection.
+func fetchExact(source string) (fetchResult, error) {
+	switch {
+	case strings.HasPrefix(source, "s3://"):
+		return fetchS3ExactKey(source)
+	case strings.HasPrefix(source, "file://"):
+		u, err := url.Parse(source)
+		if err != nil {
+			return fetchResult{}, err
+		}
+		local := filepath.FromSlash(stripWindowsFileURLPath(u.Path, runtime.GOOS))
+		return fetchResult{localPath: local, resolvedKey: local}, nil
+	default:
+		return fetchResult{localPath: source, resolvedKey: source}, nil
 	}
 }
 
@@ -483,13 +526,36 @@ func readTail(path string, n int) ([]byte, error) {
 	return buf, nil
 }
 
-func restore(sb *sandbox, format, remote string) error {
+// unexpectedGlobalsErrors filters psql "ERROR:" lines from a globals
+// restore, tolerating "already exists" (pg_dumpall redeclares the source
+// cluster's own bootstrap role, which collides with the sandbox's).
+// ON_ERROR_STOP isn't used here: it would abort at that first collision and
+// skip every role/grant statement sorting after it alphabetically.
+func unexpectedGlobalsErrors(output string) []string {
+	var bad []string
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, "ERROR:") {
+			continue
+		}
+		if strings.Contains(line, "already exists") {
+			continue
+		}
+		bad = append(bad, strings.TrimSpace(line))
+	}
+	return bad
+}
+
+func restore(sb *sandbox, format, remote string, preserveOwnership bool) error {
 	var out string
 	var err error
 	switch format {
 	case "pg_dump_custom":
-		out, err = sb.exec("pg_restore", "-U", "postgres", "-d", "postgres",
-			"--no-owner", "--no-privileges", "--exit-on-error", remote)
+		args := []string{"-U", "postgres", "-d", "postgres"}
+		if !preserveOwnership {
+			args = append(args, "--no-owner", "--no-privileges")
+		}
+		args = append(args, "--exit-on-error", remote)
+		out, err = sb.exec(append([]string{"pg_restore"}, args...)...)
 	case "pg_dump_sql":
 		out, err = sb.exec("psql", "-U", "postgres", "-d", "postgres",
 			"-v", "ON_ERROR_STOP=1", "-f", remote)

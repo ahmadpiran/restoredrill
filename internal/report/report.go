@@ -81,7 +81,8 @@ type Report struct {
 	StartedAt  Timestamp `json:"started_at"`
 	FinishedAt Timestamp `json:"finished_at"`
 
-	BackupSource string `json:"backup_source"`
+	BackupSource  string `json:"backup_source"`
+	GlobalsSource string `json:"globals_source"`
 	// BackupResolvedKey is the actual file/object drilled (differs from
 	// BackupSource for a prefix source).
 	BackupResolvedKey string    `json:"backup_resolved_key"`
