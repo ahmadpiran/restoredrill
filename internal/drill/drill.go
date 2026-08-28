@@ -695,9 +695,15 @@ func evaluateAssertion(name, out string, err error) report.CheckResult {
 func quoteIdent(ident string) string {
 	parts := strings.Split(ident, ".")
 	for i, p := range parts {
-		parts[i] = `"` + strings.ReplaceAll(p, `"`, `""`) + `"`
+		parts[i] = quoteSingleIdent(p)
 	}
 	return strings.Join(parts, ".")
+}
+
+// quoteSingleIdent quotes one identifier, never splitting on ".": for role
+// names, which aren't schema-qualified and may legitimately contain a dot.
+func quoteSingleIdent(ident string) string {
+	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
 
 func firstLine(s string) string {

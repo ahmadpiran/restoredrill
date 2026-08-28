@@ -18,6 +18,18 @@ func TestQuoteIdent(t *testing.T) {
 	}
 }
 
+func TestQuoteSingleIdentNeverSplitsOnDot(t *testing.T) {
+	cases := map[string]string{
+		"app_user": `"app_user"`,
+		"app.user": `"app.user"`,
+	}
+	for in, want := range cases {
+		if got := quoteSingleIdent(in); got != want {
+			t.Errorf("quoteSingleIdent(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestFirstLine(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"one line", "one line"},

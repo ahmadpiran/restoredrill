@@ -82,7 +82,7 @@ func (s *sandbox) queryAs(role, sql string) (string, error) {
 	args := []string{"-U", "postgres", "-d", "postgres", "-t", "-A"}
 	if role != "" {
 		args = append(args, "-q")
-		sql = fmt.Sprintf("SET ROLE %s; %s", quoteIdent(role), sql)
+		sql = fmt.Sprintf("SET ROLE %s; %s", quoteSingleIdent(role), sql)
 	}
 	args = append(args, "-c", sql)
 	out, err := s.exec(append([]string{"psql"}, args...)...)
