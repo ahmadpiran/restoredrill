@@ -13,6 +13,13 @@ backup:
   # pg_dump_custom (content is verified directly); required for pg_dump_sql
   # with a prefix source, since plain SQL has no content signature to check.
   # s3_object_pattern: "*.dump"
+  # A `pg_dumpall --globals-only` file, restored before the main backup so
+  # the roles/grants it references actually exist in the sandbox. Same
+  # source forms as `source` above, but always an exact file: no prefix or
+  # newest-object selection, since a globals dump is a single well-known
+  # file you'd name explicitly. Setting this also makes the main restore
+  # keep ownership and privileges instead of stripping them.
+  # globals_source: s3://my-backups/postgres/globals.sql
 
 postgres:
   # Match your production major version.
@@ -50,6 +57,11 @@ checks:
   rto_target: 30m
 
   # --- read-path ---
+  # Run row_counts and queries checks as this role instead of the sandbox
+  # superuser, so a grant that was never captured in the backup fails the
+  # check the way it would fail a real application. Requires
+  # backup.globals_source (the role has to exist in the sandbox first).
+  # verify_as_role: app_user
   # Fail if these tables have fewer rows than expected.
   row_counts:
     - table: users
