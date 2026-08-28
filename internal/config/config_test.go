@@ -125,3 +125,24 @@ func TestLoadRejectsInvalidS3ObjectPattern(t *testing.T) {
 		t.Fatal("expected an error for a malformed s3_object_pattern glob")
 	}
 }
+
+func TestLoadRejectsVerifyAsRoleWithoutGlobalsSource(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/x.dump\nchecks:\n  verify_as_role: app_user\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error: checks.verify_as_role requires backup.globals_source")
+	}
+}
+
+func TestLoadAllowsVerifyAsRoleWithGlobalsSource(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/x.dump\n  globals_source: /tmp/globals.sql\nchecks:\n  verify_as_role: app_user\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected no error once backup.globals_source is set, got %v", err)
+	}
+}
+
+func TestLoadAllowsGlobalsSourceAloneWithoutVerifyAsRole(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/x.dump\n  globals_source: /tmp/globals.sql\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected no error: globals_source alone is valid, got %v", err)
+	}
+}

@@ -25,6 +25,8 @@ type Backup struct {
 	Source          string `yaml:"source"`
 	Format          string `yaml:"format"`
 	S3ObjectPattern string `yaml:"s3_object_pattern"`
+	// GlobalsSource is always an exact file: no S3 prefix selection.
+	GlobalsSource string `yaml:"globals_source"`
 }
 
 type Postgres struct {
@@ -53,6 +55,8 @@ type Checks struct {
 	Queries           []Assertion   `yaml:"queries"`
 	RTOTarget         string        `yaml:"rto_target"`
 	RTOTargetDuration time.Duration `yaml:"-"`
+
+	VerifyAsRole string `yaml:"verify_as_role"`
 }
 
 type RowCount struct {
@@ -104,6 +108,9 @@ func Load(path string) (*Config, error) {
 		if _, err := pathpkg.Match(c.Backup.S3ObjectPattern, "x"); err != nil {
 			return nil, fmt.Errorf("%s: backup.s3_object_pattern %q is not a valid pattern: %w", path, c.Backup.S3ObjectPattern, err)
 		}
+	}
+	if c.Checks.VerifyAsRole != "" && c.Backup.GlobalsSource == "" {
+		return nil, fmt.Errorf("%s: checks.verify_as_role requires backup.globals_source (the role must exist in the sandbox before checks can connect as it)", path)
 	}
 	if c.Postgres.Image == "" {
 		c.Postgres.Image = "postgres:16"
