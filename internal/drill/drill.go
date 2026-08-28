@@ -526,18 +526,16 @@ func readTail(path string, n int) ([]byte, error) {
 	return buf, nil
 }
 
-// unexpectedGlobalsErrors filters psql "ERROR:" lines from a globals
-// restore, tolerating "already exists" (pg_dumpall redeclares the source
-// cluster's own bootstrap role, which collides with the sandbox's).
-// ON_ERROR_STOP isn't used here: it would abort at that first collision and
-// skip every role/grant statement sorting after it alphabetically.
+// unexpectedGlobalsErrors ignores only the expected "postgres" role
+// collision (pg_dumpall redeclares it); ON_ERROR_STOP would abort there and
+// skip every later role/grant statement alphabetically.
 func unexpectedGlobalsErrors(output string) []string {
 	var bad []string
 	for _, line := range strings.Split(output, "\n") {
 		if !strings.Contains(line, "ERROR:") {
 			continue
 		}
-		if strings.Contains(line, "already exists") {
+		if strings.Contains(line, `role "postgres" already exists`) {
 			continue
 		}
 		bad = append(bad, strings.TrimSpace(line))
