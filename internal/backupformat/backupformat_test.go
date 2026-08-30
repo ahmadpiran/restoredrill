@@ -94,7 +94,7 @@ func TestCompleteUnsupportedFormatAlwaysFalse(t *testing.T) {
 
 func TestNamesSortedAndComplete(t *testing.T) {
 	names := Names()
-	want := []string{"pg_dump_custom", "pg_dump_sql", "pgbackrest"}
+	want := []string{"existing_connection", "pg_dump_custom", "pg_dump_sql", "pgbackrest"}
 	if len(names) != len(want) {
 		t.Fatalf("got %v, want %v", names, want)
 	}
