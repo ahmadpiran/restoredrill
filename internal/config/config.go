@@ -118,6 +118,9 @@ func Load(path string) (*Config, error) {
 		if c.Backup.PgbackrestStanza == "" {
 			return nil, fmt.Errorf("%s: backup.pgbackrest_stanza is required for backup.format pgbackrest", path)
 		}
+		if c.Backup.GlobalsSource != "" {
+			return nil, fmt.Errorf("%s: backup.globals_source is not applicable to backup.format pgbackrest (a physical restore already includes roles)", path)
+		}
 	}
 	isS3Prefix := strings.HasPrefix(c.Backup.Source, "s3://") && strings.HasSuffix(c.Backup.Source, "/")
 	if c.Backup.S3ObjectPattern == "" && isS3Prefix && !backupformat.Sniffable(c.Backup.Format) {
@@ -128,7 +131,7 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: backup.s3_object_pattern %q is not a valid pattern: %w", path, c.Backup.S3ObjectPattern, err)
 		}
 	}
-	if c.Checks.VerifyAsRole != "" && c.Backup.GlobalsSource == "" {
+	if c.Checks.VerifyAsRole != "" && c.Backup.GlobalsSource == "" && c.Backup.Format != "pgbackrest" {
 		return nil, fmt.Errorf("%s: checks.verify_as_role requires backup.globals_source (the role must exist in the sandbox before checks can connect as it)", path)
 	}
 	if c.Postgres.Image == "" {

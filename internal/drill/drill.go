@@ -38,7 +38,11 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		rep.RTOTargetSeconds = cfg.Checks.RTOTargetDuration.Seconds()
 	}
 
-	sb, err := restorePgDump(cfg, rep)
+	restoreSource := restorePgDump
+	if cfg.Backup.Format == "pgbackrest" {
+		restoreSource = restorePgbackrest
+	}
+	sb, err := restoreSource(cfg, rep)
 	if sb != nil {
 		// Registered as soon as a sandbox exists so a readiness timeout still cleans up.
 		defer func() {
@@ -180,7 +184,7 @@ func restorePgDump(cfg *config.Config, rep *report.Report) (*sandbox, error) {
 		}
 	}
 
-	sb := newSandbox(cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration)
+	sb := newSandbox(cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration, nil)
 	if err := sb.start(); err != nil {
 		return sb, err
 	}
