@@ -18,6 +18,7 @@ type Format struct {
 var known = map[string]Format{
 	"pg_dump_custom": {Sniff: sniffPgDumpCustom},
 	"pg_dump_sql":    {Trailer: trailerPgDumpSQL},
+	"pgbackrest":     {},
 }
 
 // pg_dump -Fc archives start with "PGDMP".

@@ -146,3 +146,24 @@ func TestLoadAllowsGlobalsSourceAloneWithoutVerifyAsRole(t *testing.T) {
 		t.Fatalf("expected no error: globals_source alone is valid, got %v", err)
 	}
 }
+
+func TestLoadDoesNotRequireBackupSourceForPgbackrest(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: pgbackrest\n  pgbackrest_config: /tmp/pgbackrest.conf\n  pgbackrest_stanza: main\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected no error: pgbackrest has no single backup.source file, got %v", err)
+	}
+}
+
+func TestLoadRequiresPgbackrestConfig(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: pgbackrest\n  pgbackrest_stanza: main\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error when backup.pgbackrest_config is missing")
+	}
+}
+
+func TestLoadRequiresPgbackrestStanza(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: pgbackrest\n  pgbackrest_config: /tmp/pgbackrest.conf\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error when backup.pgbackrest_stanza is missing")
+	}
+}

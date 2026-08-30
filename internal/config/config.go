@@ -27,6 +27,10 @@ type Backup struct {
 	S3ObjectPattern string `yaml:"s3_object_pattern"`
 	// GlobalsSource is always an exact file: no S3 prefix selection.
 	GlobalsSource string `yaml:"globals_source"`
+
+	PgbackrestConfig   string `yaml:"pgbackrest_config"`
+	PgbackrestStanza   string `yaml:"pgbackrest_stanza"`
+	PgbackrestRepoPath string `yaml:"pgbackrest_repo_path"`
 }
 
 type Postgres struct {
@@ -91,7 +95,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if c.Backup.Source == "" {
+	if c.Backup.Source == "" && c.Backup.Format != "pgbackrest" {
 		return nil, fmt.Errorf("%s: backup.source is required", path)
 	}
 	if c.Backup.Format == "" {
@@ -99,6 +103,14 @@ func Load(path string) (*Config, error) {
 	}
 	if !backupformat.Valid(c.Backup.Format) {
 		return nil, fmt.Errorf("%s: backup.format must be one of %v, got %q", path, backupformat.Names(), c.Backup.Format)
+	}
+	if c.Backup.Format == "pgbackrest" {
+		if c.Backup.PgbackrestConfig == "" {
+			return nil, fmt.Errorf("%s: backup.pgbackrest_config is required for backup.format pgbackrest", path)
+		}
+		if c.Backup.PgbackrestStanza == "" {
+			return nil, fmt.Errorf("%s: backup.pgbackrest_stanza is required for backup.format pgbackrest", path)
+		}
 	}
 	isS3Prefix := strings.HasPrefix(c.Backup.Source, "s3://") && strings.HasSuffix(c.Backup.Source, "/")
 	if c.Backup.S3ObjectPattern == "" && isS3Prefix && !backupformat.Sniffable(c.Backup.Format) {
