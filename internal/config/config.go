@@ -41,7 +41,14 @@ type Sandbox struct {
 	// Keep controls whether the restored container survives the drill for
 	// human inspection: never (default), on-failure, or always.
 	Keep string `yaml:"keep"`
+
+	ReadyTimeout         string        `yaml:"ready_timeout"`
+	ReadyTimeoutDuration time.Duration `yaml:"-"`
 }
+
+// defaultReadyTimeout is sized for an empty container coming up, not for WAL
+// replay on a real backup; pgbackrest restores should raise it.
+const defaultReadyTimeout = 120 * time.Second
 
 // defaultMinSizeBytes is the floor when min_size_bytes is unset: tiny, just
 // enough to catch an empty file, not a stand-in for a real threshold.
@@ -149,6 +156,13 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	} else {
 		c.Checks.RTOTargetDuration = d
+	}
+	if c.Sandbox.ReadyTimeout == "" {
+		c.Sandbox.ReadyTimeoutDuration = defaultReadyTimeout
+	} else if d, err := time.ParseDuration(c.Sandbox.ReadyTimeout); err != nil {
+		return nil, fmt.Errorf("%s: sandbox.ready_timeout: invalid duration %q: %w", path, c.Sandbox.ReadyTimeout, err)
+	} else {
+		c.Sandbox.ReadyTimeoutDuration = d
 	}
 	if c.Report.Path == "" {
 		c.Report.Path = "restoredrill-report.json"

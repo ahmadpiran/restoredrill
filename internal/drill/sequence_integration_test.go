@@ -3,6 +3,7 @@ package drill
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Real-Postgres integration test: starts a sandbox, verifies
@@ -13,7 +14,7 @@ func TestSequenceIntegrityCheck(t *testing.T) {
 		t.Skipf("docker not available, skipping integration test: %v: %s", err, firstLine(out))
 	}
 
-	sb := newSandbox("postgres:16")
+	sb := newSandbox("postgres:16", 120*time.Second)
 	if err := sb.start(); err != nil {
 		t.Fatalf("starting sandbox: %v", err)
 	}

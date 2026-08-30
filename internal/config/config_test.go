@@ -91,6 +91,35 @@ func TestLoadRejectsInvalidSandboxKeep(t *testing.T) {
 	}
 }
 
+func TestLoadReadyTimeoutDefault(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/x.dump\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sandbox.ReadyTimeoutDuration != defaultReadyTimeout {
+		t.Errorf("expected default ready_timeout of %v, got %v", defaultReadyTimeout, cfg.Sandbox.ReadyTimeoutDuration)
+	}
+}
+
+func TestLoadParsesReadyTimeout(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/x.dump\nsandbox:\n  ready_timeout: 10m\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sandbox.ReadyTimeoutDuration != 10*time.Minute {
+		t.Errorf("expected ready_timeout parsed as 10m, got %v", cfg.Sandbox.ReadyTimeoutDuration)
+	}
+}
+
+func TestLoadRejectsInvalidReadyTimeout(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/x.dump\nsandbox:\n  ready_timeout: not-a-duration\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error for an invalid sandbox.ready_timeout")
+	}
+}
+
 func TestLoadRequiresS3ObjectPatternForUnsniffableFormatWithPrefix(t *testing.T) {
 	path := writeConfig(t, "backup:\n  source: s3://bucket/prefix/\n  format: pg_dump_sql\n")
 	if _, err := Load(path); err == nil {

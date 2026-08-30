@@ -128,7 +128,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		}
 	}
 
-	sb := newSandbox(cfg.Postgres.Image)
+	sb := newSandbox(cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration)
 	keep := false
 	// Registered before sb.start() so a readiness timeout still cleans up.
 	defer func() {

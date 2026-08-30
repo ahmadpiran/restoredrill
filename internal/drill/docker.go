@@ -11,15 +11,17 @@ import (
 // sandbox is a disposable Postgres container driven via the docker CLI, so the
 // agent's only runtime dependency is docker itself.
 type sandbox struct {
-	name    string
-	image   string
-	created bool // true once "docker run" has actually created the container
+	name         string
+	image        string
+	readyTimeout time.Duration
+	created      bool // true once "docker run" has actually created the container
 }
 
-func newSandbox(image string) *sandbox {
+func newSandbox(image string, readyTimeout time.Duration) *sandbox {
 	return &sandbox{
-		name:  fmt.Sprintf("restoredrill-%d", time.Now().UnixNano()),
-		image: image,
+		name:         fmt.Sprintf("restoredrill-%d", time.Now().UnixNano()),
+		image:        image,
+		readyTimeout: readyTimeout,
 	}
 }
 
@@ -32,7 +34,7 @@ func (s *sandbox) start() error {
 	// Exists from here on, even if readiness polling below times out.
 	s.created = true
 
-	deadline := time.Now().Add(120 * time.Second)
+	deadline := time.Now().Add(s.readyTimeout)
 	for time.Now().Before(deadline) {
 		if _, err := s.exec("pg_isready", "-U", "postgres"); err == nil {
 			// The official image restarts postgres once during first init;
@@ -44,7 +46,7 @@ func (s *sandbox) start() error {
 		}
 		time.Sleep(time.Second)
 	}
-	return fmt.Errorf("postgres in container %s not ready after 120s", s.name)
+	return fmt.Errorf("postgres in container %s not ready after %s", s.name, s.readyTimeout)
 }
 
 // destroy removes the container. Callers should check the error, not

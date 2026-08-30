@@ -3,6 +3,7 @@ package drill
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ahmadpiran/restoredrill/internal/config"
 )
@@ -16,7 +17,7 @@ func TestVerifyAsRoleSurfacesMissingGrant(t *testing.T) {
 		t.Skipf("docker not available, skipping integration test: %v: %s", err, firstLine(out))
 	}
 
-	sb := newSandbox("postgres:16")
+	sb := newSandbox("postgres:16", 120*time.Second)
 	if err := sb.start(); err != nil {
 		t.Fatalf("starting sandbox: %v", err)
 	}
