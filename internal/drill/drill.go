@@ -38,9 +38,61 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		rep.RTOTargetSeconds = cfg.Checks.RTOTargetDuration.Seconds()
 	}
 
+	sb, err := restorePgDump(cfg, rep)
+	if sb != nil {
+		// Registered as soon as a sandbox exists so a readiness timeout still cleans up.
+		defer func() {
+			if !sb.created {
+				return
+			}
+			keep := false
+			switch cfg.Sandbox.Keep {
+			case "always":
+				keep = true
+			case "on-failure":
+				keep = !rep.Passed
+			}
+			if keep {
+				rep.KeptContainer = sb.name
+				return
+			}
+			if err := sb.destroy(); err != nil {
+				rep.ContainerCleanupError = err.Error()
+				fmt.Fprintf(os.Stderr, "restoredrill: warning: failed to remove container %s: %v\n", sb.name, err)
+			}
+		}()
+	}
+	if err != nil {
+		return fail(rep, cfg.Checks, err)
+	}
+
+	if cfg.Checks.RTOTargetDuration > 0 {
+		met := rep.RestoreDurationSeconds <= cfg.Checks.RTOTargetDuration.Seconds()
+		rep.RTOMet = &met
+		rep.Checks = append(rep.Checks, report.CheckResult{
+			Name:    fmt.Sprintf("RTO target met (restore under %s)", cfg.Checks.RTOTargetDuration),
+			Passed:  met,
+			Details: fmt.Sprintf("restore took %.1fs", rep.RestoreDurationSeconds),
+		})
+	}
+
+	rep.Checks = append(rep.Checks, runChecks(sb, cfg.Checks)...)
+	rep.Passed = true
+	for _, c := range rep.Checks {
+		if !c.Passed {
+			rep.Passed = false
+		}
+	}
+	return rep, nil
+}
+
+// restorePgDump fetches, prechecks, and restores a pg_dump/pg_dump_custom
+// backup into a fresh sandbox. Returns the sandbox on error too, once one
+// exists, so the caller can still clean it up.
+func restorePgDump(cfg *config.Config, rep *report.Report) (*sandbox, error) {
 	fr, err := fetch(cfg.Backup)
 	if err != nil {
-		return fail(rep, cfg.Checks, fmt.Errorf("fetching backup: %w", err))
+		return nil, fmt.Errorf("fetching backup: %w", err)
 	}
 	if fr.cleanup != nil {
 		defer fr.cleanup()
@@ -54,19 +106,19 @@ func Run(cfg *config.Config) (*report.Report, error) {
 	if cfg.Backup.GlobalsSource != "" {
 		gfr, err = fetchExact(cfg.Backup.GlobalsSource)
 		if err != nil {
-			return fail(rep, cfg.Checks, fmt.Errorf("fetching globals: %w", err))
+			return nil, fmt.Errorf("fetching globals: %w", err)
 		}
 		if gfr.cleanup != nil {
 			defer gfr.cleanup()
 		}
 		if _, err := os.Stat(gfr.localPath); err != nil {
-			return fail(rep, cfg.Checks, fmt.Errorf("globals file not found: %w", err))
+			return nil, fmt.Errorf("globals file not found: %w", err)
 		}
 	}
 
 	fi, err := os.Stat(fr.localPath)
 	if err != nil {
-		return fail(rep, cfg.Checks, fmt.Errorf("backup not found: %w", err))
+		return nil, fmt.Errorf("backup not found: %w", err)
 	}
 	rep.BackupSizeBytes = fi.Size()
 
@@ -88,7 +140,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 			Details: fmt.Sprintf("backup is %d bytes", fi.Size()),
 		})
 		if fi.Size() < cfg.Checks.MinSizeBytes {
-			return fail(rep, cfg.Checks, fmt.Errorf("backup smaller than min_size_bytes (%d < %d)", fi.Size(), cfg.Checks.MinSizeBytes))
+			return nil, fmt.Errorf("backup smaller than min_size_bytes (%d < %d)", fi.Size(), cfg.Checks.MinSizeBytes)
 		}
 	}
 
@@ -106,7 +158,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		res.Passed = met
 		rep.Checks = append(rep.Checks, res)
 		if !met {
-			return fail(rep, cfg.Checks, fmt.Errorf("RPO target check failed: %s", res.Details))
+			return nil, fmt.Errorf("RPO target check failed: %s", res.Details)
 		}
 	}
 
@@ -124,34 +176,13 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		}
 		rep.Checks = append(rep.Checks, res)
 		if !complete {
-			return fail(rep, cfg.Checks, fmt.Errorf("dump completeness check failed: %s", res.Details))
+			return nil, fmt.Errorf("dump completeness check failed: %s", res.Details)
 		}
 	}
 
 	sb := newSandbox(cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration)
-	keep := false
-	// Registered before sb.start() so a readiness timeout still cleans up.
-	defer func() {
-		if !sb.created {
-			return
-		}
-		switch cfg.Sandbox.Keep {
-		case "always":
-			keep = true
-		case "on-failure":
-			keep = !rep.Passed
-		}
-		if keep {
-			rep.KeptContainer = sb.name
-			return
-		}
-		if err := sb.destroy(); err != nil {
-			rep.ContainerCleanupError = err.Error()
-			fmt.Fprintf(os.Stderr, "restoredrill: warning: failed to remove container %s: %v\n", sb.name, err)
-		}
-	}()
 	if err := sb.start(); err != nil {
-		return fail(rep, cfg.Checks, err)
+		return sb, err
 	}
 
 	if cfg.Backup.GlobalsSource != "" {
@@ -168,7 +199,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		}
 		rep.Checks = append(rep.Checks, res)
 		if !res.Passed {
-			return fail(rep, cfg.Checks, fmt.Errorf("globals restore failed: %s", res.Details))
+			return sb, fmt.Errorf("globals restore failed: %s", res.Details)
 		}
 
 		if cfg.Checks.VerifyAsRole != "" {
@@ -184,14 +215,14 @@ func Run(cfg *config.Config) (*report.Report, error) {
 			}
 			rep.Checks = append(rep.Checks, roleRes)
 			if !roleRes.Passed {
-				return fail(rep, cfg.Checks, fmt.Errorf("verify_as_role check failed: %s", roleRes.Details))
+				return sb, fmt.Errorf("verify_as_role check failed: %s", roleRes.Details)
 			}
 		}
 	}
 
 	const remote = "/tmp/restoredrill-backup"
 	if err := sb.copyIn(fr.localPath, remote); err != nil {
-		return fail(rep, cfg.Checks, err)
+		return sb, err
 	}
 
 	if cfg.Backup.Format == "pg_dump_custom" &&
@@ -203,36 +234,19 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		}
 		rep.Checks = append(rep.Checks, res)
 		if err != nil {
-			return fail(rep, cfg.Checks, fmt.Errorf("archive integrity check failed: %v: %s", err, firstLine(out)))
+			return sb, fmt.Errorf("archive integrity check failed: %v: %s", err, firstLine(out))
 		}
 	}
 
 	rep.RestoreStartedAt = report.Now()
 	restoreStart := time.Now()
 	if err := restore(sb, cfg.Backup.Format, remote, cfg.Backup.GlobalsSource != ""); err != nil {
-		return fail(rep, cfg.Checks, fmt.Errorf("restore failed: %w", err))
+		return sb, fmt.Errorf("restore failed: %w", err)
 	}
 	rep.RestoreDurationSeconds = time.Since(restoreStart).Seconds()
 	rep.RestoreFinishedAt = report.Now()
 
-	if cfg.Checks.RTOTargetDuration > 0 {
-		met := rep.RestoreDurationSeconds <= cfg.Checks.RTOTargetDuration.Seconds()
-		rep.RTOMet = &met
-		rep.Checks = append(rep.Checks, report.CheckResult{
-			Name:    fmt.Sprintf("RTO target met (restore under %s)", cfg.Checks.RTOTargetDuration),
-			Passed:  met,
-			Details: fmt.Sprintf("restore took %.1fs", rep.RestoreDurationSeconds),
-		})
-	}
-
-	rep.Checks = append(rep.Checks, runChecks(sb, cfg.Checks)...)
-	rep.Passed = true
-	for _, c := range rep.Checks {
-		if !c.Passed {
-			rep.Passed = false
-		}
-	}
-	return rep, nil
+	return sb, nil
 }
 
 func fail(rep *report.Report, cfg config.Checks, err error) (*report.Report, error) {
