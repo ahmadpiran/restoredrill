@@ -1,0 +1,51 @@
+# restoredrill: pgbackrest example configuration
+# Run: restoredrill --config pgbackrest.yml
+#
+# postgres.image must already have the pgbackrest binary installed
+# alongside Postgres; restoredrill doesn't build or ship one. Add
+# `apt-get install pgbackrest` on top of the official postgres image for
+# your major version and use that here.
+
+backup:
+  format: pgbackrest
+  # Your own working pgbackrest.conf, bind-mounted into the sandbox as-is.
+  # restoredrill shells out to the pgbackrest CLI the same way it shells out
+  # to aws for S3 sources, without reimplementing pgbackrest's own config.
+  pgbackrest_config: /etc/restoredrill/pgbackrest.conf
+  # The stanza to restore. Always restores the latest backup in it; v1 has
+  # no point-in-time target selection.
+  pgbackrest_stanza: main
+  # Only needed for a local-directory repository: the host path to bind-
+  # mount in. Your pgbackrest_config's repo1-path must be set to
+  # /var/lib/pgbackrest (restoredrill's fixed in-container mount point) for
+  # this to line up; restoredrill doesn't parse the conf to discover it.
+  # Omit entirely for a remote repository (e.g. S3), where the conf and its
+  # own credentials are all that's needed.
+  pgbackrest_repo_path: /var/backups/pgbackrest
+
+postgres:
+  # Must have pgbackrest installed; see the note above.
+  image: my-org/postgres-pgbackrest:16
+
+sandbox:
+  # A physical restore replays WAL to reach a consistent state before
+  # Postgres is ready, which can take much longer than an empty container
+  # coming up. Raise this for a large database; the default (120s) is sized
+  # for the pg_dump path.
+  ready_timeout: 20m
+
+checks:
+  min_tables: 5
+  sequence_integrity: true
+  row_counts:
+    - table: users
+      min: 100
+  queries:
+    - name: orders reference valid users
+      sql: "SELECT NOT EXISTS (SELECT 1 FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE u.id IS NULL)"
+  # verify_as_role works the same as with pg_dump, but needs no
+  # globals_source: a physical restore already includes every role.
+  # verify_as_role: app_user
+
+report:
+  path: restoredrill-report.json

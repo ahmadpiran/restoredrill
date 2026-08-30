@@ -75,7 +75,7 @@ One report can't show you if restores are slowly getting slower over time. That'
 ## Requirements
 
 - Docker
-- A PostgreSQL backup: `pg_dump -Fc` archive or plain SQL dump, local or in S3 (`aws` CLI required for S3 sources)
+- A PostgreSQL backup: `pg_dump -Fc` archive or plain SQL dump, local or in S3 (`aws` CLI required for S3 sources); or a pgbackrest repository (see [`examples/pgbackrest.yml`](examples/pgbackrest.yml))
 
 ## Alerting: no new dashboard
 
@@ -94,7 +94,8 @@ The exit code makes this a natural scheduled CI job. See [`.github/workflows/res
 ## Limits
 
 - The ephemeral-container model assumes your database fits comfortably in a container on the runner. Multi-terabyte estates need a different approach (restore to dedicated infra). restoredrill isn't that today.
-- `pg_dump`-level verification doesn't exercise PITR or WAL replay. pgBackRest support, which does, is on the roadmap.
+- pgbackrest support restores the latest backup in a stanza only; there's no target-time selection for point-in-time recovery yet. `restore_duration_seconds` for this format covers the whole physical recovery: `pgbackrest restore` plus Postgres startup plus WAL replay until recovery completes, not just the copy step.
+- restoredrill doesn't build or ship a pgbackrest-capable Postgres image. `postgres.image` needs both installed; see [`examples/pgbackrest.yml`](examples/pgbackrest.yml).
 - The archive integrity precheck works differently by format. `pg_dump_custom` gets a table-of-contents readability check, but `pg_dump_sql` has no TOC, so it gets a completeness check instead.pg_dump always writes a fixed completion marker at the end of a finished dump, and restoredrill checks for it before restoring. Both are gated by the same `archive_integrity` config flag.
 - Picking the right file from an S3 prefix still needs a pattern for plain SQL. `pg_dump_custom` candidates get filtered by their `PGDMP` header during selection. `pg_dump_sql`'s completeness check only runs later, on the one file already chosen for the restore, not during candidate selection. `backup.s3_object_pattern` is required when you combine a prefix source with `pg_dump_sql`. restoredrill fails at config load instead of guessing which file is the real backup.
 - We don't cite specific SOC 2 or ISO 27001 clause numbers here. The report is built around what the underlying control actually asks for (documented, provable recovery testing on whatever cadence your policy sets), but getting a compliance citation wrong is worse than not citing one. Check your own control language and auditor instead of trusting a clause number from us.
@@ -102,7 +103,7 @@ The exit code makes this a natural scheduled CI job. See [`.github/workflows/res
 
 ## Roadmap
 
-- pgBackRest repositories (PITR path verification)
+- pgBackRest point-in-time target selection (v1 restores the latest backup only)
 - GCS backup sources
 - MySQL, then restic
 - Differential checks (restored vs. prod over the pre-backup window)
@@ -120,7 +121,7 @@ go build ./cmd/restoredrill
 go test ./...
 ```
 
-The sequence-integrity check has a Docker-backed integration test (it starts a real Postgres container). It skips cleanly if Docker isn't available.
+Several checks have Docker-backed integration tests (they start real Postgres containers, and the pgbackrest one builds a real stanza and backup too). They skip cleanly if Docker isn't available.
 
 ## License
 
