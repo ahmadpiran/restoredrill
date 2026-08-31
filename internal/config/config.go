@@ -31,6 +31,10 @@ type Backup struct {
 	PgbackrestConfig   string `yaml:"pgbackrest_config"`
 	PgbackrestStanza   string `yaml:"pgbackrest_stanza"`
 	PgbackrestRepoPath string `yaml:"pgbackrest_repo_path"`
+
+	// Passed straight to psql unparsed. No password field: use .pgpass or
+	// PGPASSWORD instead.
+	ConnectionDSN string `yaml:"connection_dsn"`
 }
 
 type Postgres struct {
@@ -102,7 +106,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if c.Backup.Source == "" && c.Backup.Format != "pgbackrest" {
+	if c.Backup.Source == "" && c.Backup.Format != "pgbackrest" && c.Backup.Format != "existing_connection" {
 		return nil, fmt.Errorf("%s: backup.source is required", path)
 	}
 	if c.Backup.Format == "" {
@@ -122,6 +126,29 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: backup.globals_source is not applicable to backup.format pgbackrest (a physical restore already includes roles)", path)
 		}
 	}
+	if c.Backup.Format == "existing_connection" {
+		if c.Backup.ConnectionDSN == "" {
+			return nil, fmt.Errorf("%s: backup.connection_dsn is required for backup.format existing_connection", path)
+		}
+		if c.Backup.GlobalsSource != "" {
+			return nil, fmt.Errorf("%s: backup.globals_source is not applicable to backup.format existing_connection (the target database already has its own roles)", path)
+		}
+		if c.Backup.S3ObjectPattern != "" {
+			return nil, fmt.Errorf("%s: backup.s3_object_pattern is not applicable to backup.format existing_connection (there is no backup file to select)", path)
+		}
+		if c.Checks.RTOTarget != "" {
+			return nil, fmt.Errorf("%s: checks.rto_target is not applicable to backup.format existing_connection (restoredrill performs no restore to time)", path)
+		}
+		if c.Checks.RPOTarget != "" {
+			return nil, fmt.Errorf("%s: checks.rpo_target is not applicable to backup.format existing_connection (there is no backup timestamp to check freshness against; express a freshness check as a checks.queries assertion against a real column instead)", path)
+		}
+		if c.Checks.MinSizeBytes != 0 {
+			return nil, fmt.Errorf("%s: checks.min_size_bytes is not applicable to backup.format existing_connection (there is no backup file to size)", path)
+		}
+		if c.Checks.ArchiveIntegrity != nil {
+			return nil, fmt.Errorf("%s: checks.archive_integrity is not applicable to backup.format existing_connection (there is no archive file)", path)
+		}
+	}
 	isS3Prefix := strings.HasPrefix(c.Backup.Source, "s3://") && strings.HasSuffix(c.Backup.Source, "/")
 	if c.Backup.S3ObjectPattern == "" && isS3Prefix && !backupformat.Sniffable(c.Backup.Format) {
 		return nil, fmt.Errorf("%s: backup.s3_object_pattern is required for backup.format %q (no content signature) with a prefix backup.source; set a pattern like \"*.sql\" to identify the backup among sibling objects", path, c.Backup.Format)
@@ -131,10 +158,10 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: backup.s3_object_pattern %q is not a valid pattern: %w", path, c.Backup.S3ObjectPattern, err)
 		}
 	}
-	if c.Checks.VerifyAsRole != "" && c.Backup.GlobalsSource == "" && c.Backup.Format != "pgbackrest" {
+	if c.Checks.VerifyAsRole != "" && c.Backup.GlobalsSource == "" && c.Backup.Format != "pgbackrest" && c.Backup.Format != "existing_connection" {
 		return nil, fmt.Errorf("%s: checks.verify_as_role requires backup.globals_source (the role must exist in the sandbox before checks can connect as it)", path)
 	}
-	if c.Postgres.Image == "" {
+	if c.Postgres.Image == "" && c.Backup.Format != "existing_connection" {
 		c.Postgres.Image = "postgres:16"
 	}
 	switch c.Sandbox.Keep {
@@ -143,6 +170,9 @@ func Load(path string) (*Config, error) {
 	case "never", "on-failure", "always":
 	default:
 		return nil, fmt.Errorf("%s: sandbox.keep must be never, on-failure, or always", path)
+	}
+	if c.Backup.Format == "existing_connection" && c.Sandbox.Keep != "never" {
+		return nil, fmt.Errorf("%s: sandbox.keep must be never (or unset) for backup.format existing_connection (restoredrill does not own this database)", path)
 	}
 	switch {
 	case c.Checks.MinSizeBytes < 0:

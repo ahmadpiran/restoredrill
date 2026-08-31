@@ -196,3 +196,55 @@ func TestLoadRequiresPgbackrestStanza(t *testing.T) {
 		t.Fatal("expected an error when backup.pgbackrest_stanza is missing")
 	}
 }
+
+func TestLoadDoesNotRequireBackupSourceForExistingConnection(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected no error: existing_connection has no backup.source file, got %v", err)
+	}
+}
+
+func TestLoadRequiresConnectionDSN(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: existing_connection\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error when backup.connection_dsn is missing")
+	}
+}
+
+func TestLoadExistingConnectionDoesNotDefaultPostgresImage(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Postgres.Image != "" {
+		t.Errorf("expected postgres.image to stay empty for existing_connection (no image is ever used), got %q", cfg.Postgres.Image)
+	}
+}
+
+func TestLoadExistingConnectionAllowsVerifyAsRoleWithoutGlobalsSource(t *testing.T) {
+	path := writeConfig(t, "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\nchecks:\n  verify_as_role: app_user\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected no error: the role already exists on the target, got %v", err)
+	}
+}
+
+func TestLoadExistingConnectionRejectsInapplicableOptions(t *testing.T) {
+	cases := map[string]string{
+		"globals_source":    "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\n  globals_source: /tmp/globals.sql\n",
+		"s3_object_pattern": "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\n  s3_object_pattern: \"*.dump\"\n",
+		"rto_target":        "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\nchecks:\n  rto_target: 30m\n",
+		"rpo_target":        "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\nchecks:\n  rpo_target: 24h\n",
+		"min_size_bytes":    "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\nchecks:\n  min_size_bytes: 100\n",
+		"archive_integrity": "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\nchecks:\n  archive_integrity: true\n",
+		"sandbox.keep":      "backup:\n  format: existing_connection\n  connection_dsn: postgres://localhost/app\nsandbox:\n  keep: always\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeConfig(t, body)
+			if _, err := Load(path); err == nil {
+				t.Fatalf("expected an error: %s is not applicable to backup.format existing_connection", name)
+			}
+		})
+	}
+}
