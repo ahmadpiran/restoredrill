@@ -2,7 +2,7 @@
 
 **Untested backups aren't backups.** restoredrill proves your PostgreSQL backups actually restore. It fetches the latest backup, restores it into a throwaway Postgres container, runs checks you define, and writes a JSON report with the restore time. Or, if something else already restored a copy for you, it can just connect and run the same checks against that instead.
 
-> Status: v0.2.0, early days. Postgres only. Things may still change.
+> Status: v0.3.0, early days. Postgres only. Things may still change.
 
 ## Why
 
