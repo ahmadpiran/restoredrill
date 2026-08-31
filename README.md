@@ -1,6 +1,6 @@
 # restoredrill
 
-**Untested backups aren't backups.** restoredrill proves your PostgreSQL backups actually restore. It fetches the latest backup, restores it into a throwaway Postgres container, runs checks you define, and writes a JSON report with the restore time.
+**Untested backups aren't backups.** restoredrill proves your PostgreSQL backups actually restore. It fetches the latest backup, restores it into a throwaway Postgres container, runs checks you define, and writes a JSON report with the restore time. Or, if something else already restored a copy for you, it can just connect and run the same checks against that instead.
 
 > Status: v0.2.0, early days. Postgres only. Things may still change.
 
@@ -52,6 +52,8 @@ Checks run in tiers. Every check is fail-closed: if a check can't run, that coun
 3. **Read-path**: row counts, data freshness, and any SQL assertions you write. A restore can exit 0 and still be lying until someone actually reads the data. 
 4. **RTO evidence**: how long the restore actually took, checked against a target if you set one.
 5. **Environment sanity**: the container has to come up and accept connections at all, which also proves the recovery environment has enough room to work.
+
+`backup.format: existing_connection` skips tiers 1, 4, and 5: there's no backup file to precheck, no restore to time, no container of its own to come up. It gets a single connectivity precheck instead, then runs tiers 2 and 3 the same way as every other format.
 
 ## The evidence report
 
