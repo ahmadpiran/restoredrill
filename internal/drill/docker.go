@@ -3,6 +3,7 @@ package drill
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ type sandbox struct {
 	readyTimeout time.Duration
 	mounts       []mount
 	created      bool // true once "docker run" has actually created the container
+	// dsn set: existing_connection. query/queryAs run psql on the host
+	// against it instead of docker exec; exec is never called.
+	dsn string
 }
 
 type mount struct {
@@ -30,6 +34,11 @@ func newSandbox(image string, readyTimeout time.Duration, mounts []mount) *sandb
 		readyTimeout: readyTimeout,
 		mounts:       mounts,
 	}
+}
+
+// created stays false: there is no container to clean up.
+func newExistingConnectionSandbox(dsn string) *sandbox {
+	return &sandbox{dsn: dsn}
 }
 
 func (s *sandbox) mountArgs() []string {
@@ -137,18 +146,48 @@ func (s *sandbox) query(sql string) (string, error) {
 // suppresses the "SET" status line psql would otherwise print ahead of the
 // result, even under -t.
 func (s *sandbox) queryAs(role, sql string) (string, error) {
-	args := []string{"-U", "postgres", "-d", "postgres", "-t", "-A"}
+	var args []string
+	if s.dsn == "" {
+		args = []string{"-U", "postgres", "-d", "postgres", "-t", "-A"}
+	} else {
+		args = []string{"-d", s.dsn, "-t", "-A"}
+	}
 	if role != "" {
 		args = append(args, "-q")
 		sql = fmt.Sprintf("SET ROLE %s; %s", quoteSingleIdent(role), sql)
 	}
 	args = append(args, "-c", sql)
-	out, err := s.exec(append([]string{"psql"}, args...)...)
+	out, err := s.runPsql(args...)
 	return strings.TrimSpace(out), err
+}
+
+// runPsql runs psql inside the sandbox container, or, when s.dsn is set
+// (existing_connection), directly on the host against the target. The
+// host path enforces a connect timeout and a read-only session:
+// restoredrill is a guest on that database, never the owner.
+func (s *sandbox) runPsql(args ...string) (string, error) {
+	if s.dsn == "" {
+		return s.exec(append([]string{"psql"}, args...)...)
+	}
+	env := append(os.Environ(),
+		"PGCONNECT_TIMEOUT=10",
+		"PGOPTIONS=-c default_transaction_read_only=on",
+	)
+	return runEnv(env, append([]string{"psql"}, args...)...)
 }
 
 func run(args ...string) (string, error) {
 	cmd := exec.Command(args[0], args[1:]...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+func runEnv(env []string, args ...string) (string, error) {
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = env
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
