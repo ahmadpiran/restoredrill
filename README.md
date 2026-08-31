@@ -64,6 +64,7 @@ Every field is always present, never missing just because it doesn't apply. Audi
 - `backup_candidates_considered`: every S3 prefix object restoredrill looked at, in order, and why any got skipped. Empty for non-prefix sources.
 - `backup_timestamp` / `backup_age_seconds` / `rpo_target_seconds` / `rpo_met`: the freshness and RPO evidence described above.
 - `restore_initiated_at` / `restore_completed_at` / `restore_duration_seconds` / `rto_target_seconds` / `rto_met`: RTO evidence, measured against a target if you set one.
+- `restore_method`: which `backup.format` produced the database being checked. Every report implicitly used to say "restoredrill restored this backup and then checked it" — for `existing_connection` (see below) that's false, so this field says outright which situation produced the report, instead of leaving `restore_duration_seconds: 0` and an empty backup source looking like a bug.
 - `validation_errors`: every failed check, as its own field, with what failed and why. If a run fails, you want to know what broke, not just that something did.
 - `notify_errors`: a broken Slack or webhook URL is a finding, not a silent no-op. If a notify sink fails to deliver, it shows up here, and the process exits non-zero, even if the drill itself passed.
 - All timestamps are a literal `"YYYY-MM-DD HH:MM:SS UTC"` string, not epoch or RFC3339. Most auditor workflows end in copy-pasting into a spreadsheet, and this format survives that.
@@ -74,8 +75,8 @@ One report can't show you if restores are slowly getting slower over time. That'
 
 ## Requirements
 
-- Docker
-- A PostgreSQL backup: `pg_dump -Fc` archive or plain SQL dump, local or in S3 (`aws` CLI required for S3 sources); or a pgbackrest repository (see [`examples/pgbackrest.yml`](examples/pgbackrest.yml))
+- Docker (not needed for `backup.format: existing_connection`, see below)
+- A PostgreSQL backup: `pg_dump -Fc` archive or plain SQL dump, local or in S3 (`aws` CLI required for S3 sources); or a pgbackrest repository (see [`examples/pgbackrest.yml`](examples/pgbackrest.yml)); or an already-restored database someone else's tooling produced (`psql` on the host required, see [`examples/existing-connection.yml`](examples/existing-connection.yml))
 
 ## Alerting: no new dashboard
 
@@ -100,6 +101,7 @@ The exit code makes this a natural scheduled CI job. See [`.github/workflows/res
 - Picking the right file from an S3 prefix still needs a pattern for plain SQL. `pg_dump_custom` candidates get filtered by their `PGDMP` header during selection. `pg_dump_sql`'s completeness check only runs later, on the one file already chosen for the restore, not during candidate selection. `backup.s3_object_pattern` is required when you combine a prefix source with `pg_dump_sql`. restoredrill fails at config load instead of guessing which file is the real backup.
 - We don't cite specific SOC 2 or ISO 27001 clause numbers here. The report is built around what the underlying control actually asks for (documented, provable recovery testing on whatever cadence your policy sets), but getting a compliance citation wrong is worse than not citing one. Check your own control language and auditor instead of trusting a clause number from us.
 - By default, checks run as the sandbox superuser, so a missing application role or grant won't show up as a failure the way it would in a real recovery. Set `backup.globals_source` (a `pg_dumpall --globals-only` file) and `checks.verify_as_role` to restore real roles and grants, and check them as that role instead. See [`examples/restoredrill.yml`](examples/restoredrill.yml).
+- `backup.format: existing_connection` trusts whatever connection it's given: restoredrill only verifies the data it can see, with no way to confirm the "existing restore" that produced it was itself done correctly. Its session is enforced read-only at the Postgres level (`default_transaction_read_only=on`), so a check can't write to a database restoredrill doesn't own, but it can't stop that database from being the wrong one, or a stale one, if whatever restored it got that wrong.
 
 ## Roadmap
 
@@ -121,7 +123,7 @@ go build ./cmd/restoredrill
 go test ./...
 ```
 
-Several checks have Docker-backed integration tests (they start real Postgres containers, and the pgbackrest one builds a real stanza and backup too). They skip cleanly if Docker isn't available.
+Several checks have Docker-backed integration tests (they start real Postgres containers, and the pgbackrest one builds a real stanza and backup too). They skip cleanly if Docker isn't available. The `existing_connection` tests also need `psql` on the host, since that's what this mode's own code path uses to connect; they skip cleanly if it's missing too.
 
 ## License
 

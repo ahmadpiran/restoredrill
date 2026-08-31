@@ -1,0 +1,39 @@
+# restoredrill: existing-connection example configuration
+# Run: restoredrill --config existing-connection.yml
+#
+# Use this when something else already restored and mounted a database copy
+# (Veeam SureBackup, Commvault Live Mount, a manually restored replica) and
+# you just want restoredrill's checks run against it. restoredrill performs
+# no restore of its own here: it connects, verifies, and leaves.
+
+backup:
+  format: existing_connection
+  # A full postgres:// URI or libpq keyword string, passed straight to psql.
+  # Do NOT put a password here. Auth comes from ~/.pgpass or PGPASSWORD in
+  # the environment, the same way restoredrill never touches AWS credentials
+  # directly for S3 sources: it delegates to the tool that already knows how
+  # to authenticate.
+  connection_dsn: postgres://readonly_user@db-copy.internal:5432/app
+
+# Not applicable to this format and rejected at config load if set:
+# postgres.image, sandbox.keep (other than never), backup.globals_source,
+# backup.s3_object_pattern, checks.rto_target, checks.rpo_target,
+# checks.min_size_bytes, checks.archive_integrity. There's no restore for
+# restoredrill to time, no backup file to size or verify, and no image or
+# container of its own.
+
+checks:
+  min_tables: 5
+  sequence_integrity: true
+  row_counts:
+    - table: users
+      min: 100
+  queries:
+    - name: orders reference valid users
+      sql: "SELECT NOT EXISTS (SELECT 1 FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE u.id IS NULL)"
+  # verify_as_role works the same as with pg_dump, but needs no
+  # globals_source: the roles already exist on the target.
+  # verify_as_role: app_user
+
+report:
+  path: restoredrill-report.json
