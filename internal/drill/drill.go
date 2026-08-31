@@ -25,6 +25,7 @@ import (
 func Run(cfg *config.Config) (*report.Report, error) {
 	rep := &report.Report{
 		Version:       buildinfo.Version,
+		RestoreMethod: cfg.Backup.Format,
 		StartedAt:     report.Now(),
 		BackupSource:  cfg.Backup.Source,
 		GlobalsSource: cfg.Backup.GlobalsSource,

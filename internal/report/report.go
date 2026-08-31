@@ -72,6 +72,11 @@ type Report struct {
 	// Version is the build version that produced this report (internal/buildinfo).
 	Version string `json:"version"`
 
+	// backup.format. Lets a reader tell an existing_connection drill (no
+	// restore performed) apart from one where Restore*/RTO* are zero for
+	// another reason.
+	RestoreMethod string `json:"restore_method"`
+
 	// Provenance: how and by whom this drill was triggered, same schema
 	// whether it ran on a schedule or a human pushed the button.
 	TriggeredBy     string `json:"triggered_by"` // "scheduled" or "manual"
