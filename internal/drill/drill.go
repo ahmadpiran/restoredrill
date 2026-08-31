@@ -40,8 +40,11 @@ func Run(cfg *config.Config) (*report.Report, error) {
 	}
 
 	restoreSource := restorePgDump
-	if cfg.Backup.Format == "pgbackrest" {
+	switch cfg.Backup.Format {
+	case "pgbackrest":
 		restoreSource = restorePgbackrest
+	case "existing_connection":
+		restoreSource = restoreExistingConnection
 	}
 	sb, err := restoreSource(cfg, rep)
 	if sb != nil {
