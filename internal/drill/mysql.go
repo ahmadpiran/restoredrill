@@ -59,3 +59,18 @@ func restoreMysql(sb *sandbox, remote string) error {
 	}
 	return nil
 }
+
+// A restored object whose DEFINER account is missing (mysqldump does not
+// dump users) loads cleanly and only fails when invoked, with ERROR 1449.
+// group_concat would otherwise truncate the list at 1KB.
+func brokenDefinersSQL(database string) string {
+	db := quoteLiteral(database)
+	return `SET SESSION group_concat_max_len = 100000;
+SELECT coalesce(group_concat(obj ORDER BY obj SEPARATOR ', '), '') FROM (
+  SELECT concat('view ', TABLE_SCHEMA, '.', TABLE_NAME) AS obj, DEFINER AS d, TABLE_SCHEMA AS s FROM information_schema.VIEWS
+  UNION ALL SELECT concat('trigger ', TRIGGER_SCHEMA, '.', TRIGGER_NAME), DEFINER, TRIGGER_SCHEMA FROM information_schema.TRIGGERS
+  UNION ALL SELECT concat('event ', EVENT_SCHEMA, '.', EVENT_NAME), DEFINER, EVENT_SCHEMA FROM information_schema.EVENTS
+  UNION ALL SELECT concat('routine ', ROUTINE_SCHEMA, '.', ROUTINE_NAME), DEFINER, ROUTINE_SCHEMA FROM information_schema.ROUTINES
+) o WHERE o.s = ` + db + `
+  AND o.d NOT IN (SELECT concat(user, '@', host) FROM mysql.user)`
+}

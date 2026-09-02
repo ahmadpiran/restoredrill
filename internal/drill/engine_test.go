@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ahmadpiran/restoredrill/internal/backupformat"
+	"github.com/ahmadpiran/restoredrill/internal/config"
 )
 
 func TestEveryKnownFormatHasAnEngine(t *testing.T) {
@@ -95,4 +96,33 @@ func TestQueryMySQLRefusesVerifyAsRole(t *testing.T) {
 	if _, err := sb.queryAs("app_user", "SELECT 1"); err == nil {
 		t.Fatal("expected queryAs with a role to fail for MySQL rather than silently run with full privileges")
 	}
+}
+
+func TestBrokenDefinersSQLCoversEveryDefinerBearingObject(t *testing.T) {
+	sql := brokenDefinersSQL("appdb")
+	for _, table := range []string{"information_schema.VIEWS", "information_schema.TRIGGERS", "information_schema.EVENTS", "information_schema.ROUTINES"} {
+		if !strings.Contains(sql, table) {
+			t.Errorf("expected %s to be checked for missing definers", table)
+		}
+	}
+	if !strings.Contains(sql, "mysql.user") {
+		t.Error("expected definers to be compared against mysql.user")
+	}
+}
+
+func TestBrokenDefinersSQLScopesToTheConfiguredDatabase(t *testing.T) {
+	sql := brokenDefinersSQL("app'db")
+	if !strings.Contains(sql, "o.s = 'app''db'") {
+		t.Errorf("expected the database name to be quoted as a literal and scoped on, got %q", sql)
+	}
+}
+
+func TestDefinerIntegrityIsExpectedAfterAnAbortedDrill(t *testing.T) {
+	names := expectedCheckNames(config.Checks{DefinerIntegrity: true})
+	for _, n := range names {
+		if n == "definer integrity" {
+			return
+		}
+	}
+	t.Errorf("expected an aborted drill to record the definer integrity check as unevaluated, got %v", names)
 }

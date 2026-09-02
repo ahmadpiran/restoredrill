@@ -301,6 +301,9 @@ func expectedCheckNames(cfg config.Checks) []string {
 	if cfg.SequenceIntegrity {
 		names = append(names, "sequence integrity")
 	}
+	if cfg.DefinerIntegrity {
+		names = append(names, "definer integrity")
+	}
 	for _, rc := range cfg.RowCounts {
 		names = append(names, fmt.Sprintf("%s has at least %d rows", rc.Table, rc.Min))
 	}
@@ -671,6 +674,18 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 			res.Details = "check failed to run: " + firstLine(out)
 		case out != "":
 			res.Details = "sequences behind their column max: " + out
+		}
+		results = append(results, res)
+	}
+
+	if cfg.DefinerIntegrity {
+		out, err := sb.query(brokenDefinersSQL(sb.database))
+		res := report.CheckResult{Name: "definer integrity", Passed: err == nil && out == ""}
+		switch {
+		case err != nil:
+			res.Details = "check failed to run: " + firstLine(out)
+		case out != "":
+			res.Details = "objects whose definer is missing: " + out
 		}
 		results = append(results, res)
 	}
