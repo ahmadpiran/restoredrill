@@ -248,3 +248,70 @@ func TestLoadExistingConnectionRejectsInapplicableOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadMysqldumpSQLDefaultsImageAndLeavesPostgresImageEmpty(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/dump.sql\n  format: mysqldump_sql\nmysql:\n  database: appdb\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MySQL.Image != "mysql:8" {
+		t.Errorf("expected mysql.image to default to mysql:8, got %q", cfg.MySQL.Image)
+	}
+	if cfg.Postgres.Image != "" {
+		t.Errorf("expected postgres.image to stay empty for mysqldump_sql, got %q", cfg.Postgres.Image)
+	}
+}
+
+func TestLoadMysqldumpSQLKeepsExplicitImage(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/dump.sql\n  format: mysqldump_sql\nmysql:\n  image: mysql:8.4\n  database: appdb\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MySQL.Image != "mysql:8.4" {
+		t.Errorf("expected mysql.image to be kept, got %q", cfg.MySQL.Image)
+	}
+}
+
+func TestLoadRequiresMySQLDatabase(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/dump.sql\n  format: mysqldump_sql\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error when mysql.database is missing")
+	}
+}
+
+func TestLoadMysqldumpSQLRejectsInapplicableOptions(t *testing.T) {
+	const base = "backup:\n  source: /tmp/dump.sql\n  format: mysqldump_sql\nmysql:\n  database: appdb\n"
+	cases := map[string]string{
+		"globals_source":     "backup:\n  source: /tmp/dump.sql\n  format: mysqldump_sql\n  globals_source: /tmp/globals.sql\nmysql:\n  database: appdb\n",
+		"verify_as_role":     base + "checks:\n  verify_as_role: app_user\n",
+		"sequence_integrity": base + "checks:\n  sequence_integrity: true\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeConfig(t, body)
+			if _, err := Load(path); err == nil {
+				t.Errorf("expected %s to be rejected for mysqldump_sql", name)
+			}
+		})
+	}
+}
+
+func TestLoadDefinerIntegrityIsMysqlOnly(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: /tmp/dump.sql\n  format: mysqldump_sql\nmysql:\n  database: appdb\nchecks:\n  definer_integrity: true\n")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected definer_integrity to be allowed for mysqldump_sql, got %v", err)
+	}
+	path = writeConfig(t, "backup:\n  source: /tmp/x.dump\n  format: pg_dump_custom\nchecks:\n  definer_integrity: true\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected definer_integrity to be rejected for a Postgres format")
+	}
+}
+
+func TestLoadMysqldumpSQLRequiresS3ObjectPatternWithPrefix(t *testing.T) {
+	path := writeConfig(t, "backup:\n  source: s3://bucket/dumps/\n  format: mysqldump_sql\nmysql:\n  database: appdb\n")
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error: mysqldump_sql has no content signature, so a prefix source needs a pattern")
+	}
+}

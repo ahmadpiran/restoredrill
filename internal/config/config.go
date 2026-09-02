@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Backup   Backup   `yaml:"backup"`
 	Postgres Postgres `yaml:"postgres"`
+	MySQL    MySQL    `yaml:"mysql"`
 	Sandbox  Sandbox  `yaml:"sandbox"`
 	Checks   Checks   `yaml:"checks"`
 	Notify   Notify   `yaml:"notify"`
@@ -41,6 +42,11 @@ type Postgres struct {
 	Image string `yaml:"image"`
 }
 
+type MySQL struct {
+	Image    string `yaml:"image"`
+	Database string `yaml:"database"`
+}
+
 type Sandbox struct {
 	// Keep controls whether the restored container survives the drill for
 	// human inspection: never (default), on-failure, or always.
@@ -66,6 +72,7 @@ type Checks struct {
 
 	MinTables         int           `yaml:"min_tables"`
 	SequenceIntegrity bool          `yaml:"sequence_integrity"`
+	DefinerIntegrity  bool          `yaml:"definer_integrity"`
 	RowCounts         []RowCount    `yaml:"row_counts"`
 	Queries           []Assertion   `yaml:"queries"`
 	RTOTarget         string        `yaml:"rto_target"`
@@ -149,6 +156,22 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("%s: checks.archive_integrity is not applicable to backup.format existing_connection (there is no archive file)", path)
 		}
 	}
+	if c.Backup.Format == "mysqldump_sql" {
+		if c.MySQL.Database == "" {
+			return nil, fmt.Errorf("%s: mysql.database is required for backup.format mysqldump_sql (a mysqldump file need not name a database, and every check runs against this one)", path)
+		}
+		if c.Backup.GlobalsSource != "" {
+			return nil, fmt.Errorf("%s: backup.globals_source is not applicable to backup.format mysqldump_sql (mysqldump does not dump users; set checks.definer_integrity to catch objects whose definer is missing)", path)
+		}
+		if c.Checks.VerifyAsRole != "" {
+			return nil, fmt.Errorf("%s: checks.verify_as_role is not applicable to backup.format mysqldump_sql (MySQL SET ROLE does not drop the connecting account's own privileges, so checks would still run with full rights)", path)
+		}
+		if c.Checks.SequenceIntegrity {
+			return nil, fmt.Errorf("%s: checks.sequence_integrity is not applicable to backup.format mysqldump_sql (sequences are a Postgres concept)", path)
+		}
+	} else if c.Checks.DefinerIntegrity {
+		return nil, fmt.Errorf("%s: checks.definer_integrity is only applicable to backup.format mysqldump_sql (definers are a MySQL concept)", path)
+	}
 	isS3Prefix := strings.HasPrefix(c.Backup.Source, "s3://") && strings.HasSuffix(c.Backup.Source, "/")
 	if c.Backup.S3ObjectPattern == "" && isS3Prefix && !backupformat.Sniffable(c.Backup.Format) {
 		return nil, fmt.Errorf("%s: backup.s3_object_pattern is required for backup.format %q (no content signature) with a prefix backup.source; set a pattern like \"*.sql\" to identify the backup among sibling objects", path, c.Backup.Format)
@@ -161,8 +184,16 @@ func Load(path string) (*Config, error) {
 	if c.Checks.VerifyAsRole != "" && c.Backup.GlobalsSource == "" && c.Backup.Format != "pgbackrest" && c.Backup.Format != "existing_connection" {
 		return nil, fmt.Errorf("%s: checks.verify_as_role requires backup.globals_source (the role must exist in the sandbox before checks can connect as it)", path)
 	}
-	if c.Postgres.Image == "" && c.Backup.Format != "existing_connection" {
-		c.Postgres.Image = "postgres:16"
+	switch c.Backup.Format {
+	case "existing_connection":
+	case "mysqldump_sql":
+		if c.MySQL.Image == "" {
+			c.MySQL.Image = "mysql:8"
+		}
+	default:
+		if c.Postgres.Image == "" {
+			c.Postgres.Image = "postgres:16"
+		}
 	}
 	switch c.Sandbox.Keep {
 	case "":
