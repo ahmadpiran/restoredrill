@@ -38,6 +38,12 @@ func newSandbox(eng engine, image string, readyTimeout time.Duration, mounts []m
 	}
 }
 
+func newMySQLSandbox(image, database string, readyTimeout time.Duration) *sandbox {
+	sb := newSandbox(mysqlEngine, image, readyTimeout, nil)
+	sb.database = database
+	return sb
+}
+
 // created stays false: there is no container to clean up.
 func newExistingConnectionSandbox(dsn string) *sandbox {
 	return &sandbox{dsn: dsn, eng: postgresEngine}
@@ -73,6 +79,29 @@ func (s *sandbox) start() error {
 		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("postgres in container %s not ready after %s", s.name, s.readyTimeout)
+}
+
+func (s *sandbox) startMySQL() error {
+	out, err := run("docker", "run", "-d", "--name", s.name,
+		"-e", "MYSQL_ROOT_PASSWORD="+mysqlRootPassword, s.image)
+	if err != nil {
+		return fmt.Errorf("starting mysql container: %v: %s", err, out)
+	}
+	s.created = true
+
+	deadline := time.Now().Add(s.readyTimeout)
+	for time.Now().Before(deadline) {
+		// The image's temporary init server answers on the same socket with
+		// the real password, so only a real port proves the final server.
+		out, err := s.execEnv(mysqlEnv(), "mysql", "-u", "root", "-N", "-B", "-e", "SELECT @@port")
+		if err == nil {
+			if port := strings.TrimSpace(out); port != "" && port != "0" {
+				return nil
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("mysql in container %s not ready after %s", s.name, s.readyTimeout)
 }
 
 func (s *sandbox) startUninitialized() error {
@@ -151,8 +180,6 @@ func (s *sandbox) query(sql string) (string, error) {
 	return s.queryAs("", sql)
 }
 
-// queryAs runs sql as role instead of the sandbox superuser, if the engine
-// supports it.
 func (s *sandbox) queryAs(role, sql string) (string, error) {
 	out, err := s.eng.query(s, role, sql)
 	return strings.TrimSpace(out), err

@@ -100,6 +100,7 @@ type Report struct {
 	BackupCandidatesConsidered []BackupCandidate `json:"backup_candidates_considered"`
 
 	PostgresImage string `json:"postgres_image"`
+	MySQLImage    string `json:"mysql_image"`
 
 	RestoreStartedAt       Timestamp `json:"restore_initiated_at"`
 	RestoreFinishedAt      Timestamp `json:"restore_completed_at"`

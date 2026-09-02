@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// engine is the per-database behavior every check depends on, keyed by
-// backup format.
 type engine struct {
 	quoteIdent   func(string) string
 	minTablesSQL func(database string) string
@@ -16,6 +14,8 @@ type engine struct {
 }
 
 const mysqlRootPassword = "restoredrill"
+
+func mysqlEnv() []string { return []string{"MYSQL_PWD=" + mysqlRootPassword} }
 
 var engines = map[string]engine{
 	"pg_dump_custom":      postgresEngine,
@@ -104,8 +104,7 @@ func queryMySQL(sb *sandbox, role, sql string) (string, error) {
 	if role != "" {
 		return "", fmt.Errorf("verify_as_role is not supported for MySQL: SET ROLE does not drop the connecting account's own privileges")
 	}
-	return sb.execEnv([]string{"MYSQL_PWD=" + mysqlRootPassword},
-		"mysql", "-u", "root", "-D", sb.database, "-N", "-B", "-e", sql)
+	return sb.execEnv(mysqlEnv(), "mysql", "-u", "root", "-D", sb.database, "-N", "-B", "-e", sql)
 }
 
 // runPsql runs psql inside the sandbox container, or, when sb.dsn is set

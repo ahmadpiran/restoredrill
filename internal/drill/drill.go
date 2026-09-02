@@ -30,6 +30,7 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		BackupSource:  cfg.Backup.Source,
 		GlobalsSource: cfg.Backup.GlobalsSource,
 		PostgresImage: cfg.Postgres.Image,
+		MySQLImage:    cfg.MySQL.Image,
 	}
 	defer func() { rep.FinishedAt = report.Now() }()
 
@@ -45,6 +46,8 @@ func Run(cfg *config.Config) (*report.Report, error) {
 		restoreSource = restorePgbackrest
 	case "existing_connection":
 		restoreSource = restoreExistingConnection
+	case "mysqldump_sql":
+		restoreSource = restoreMysqlDump
 	}
 	sb, err := restoreSource(cfg, rep)
 	if sb != nil {
@@ -124,68 +127,8 @@ func restorePgDump(cfg *config.Config, rep *report.Report) (*sandbox, error) {
 		}
 	}
 
-	fi, err := os.Stat(fr.localPath)
-	if err != nil {
-		return nil, fmt.Errorf("backup not found: %w", err)
-	}
-	rep.BackupSizeBytes = fi.Size()
-
-	// Prefer the source's own timestamp over local mtime, which is only
-	// "when we downloaded it".
-	backupTime := fr.timestamp
-	if backupTime.IsZero() {
-		backupTime = fi.ModTime()
-	}
-	if !backupTime.IsZero() {
-		rep.BackupTimestamp = report.At(backupTime)
-		rep.BackupAgeSeconds = time.Since(backupTime).Seconds()
-	}
-
-	if cfg.Checks.MinSizeBytes > 0 {
-		rep.Checks = append(rep.Checks, report.CheckResult{
-			Name:    fmt.Sprintf("precheck: backup at least %d bytes", cfg.Checks.MinSizeBytes),
-			Passed:  fi.Size() >= cfg.Checks.MinSizeBytes,
-			Details: fmt.Sprintf("backup is %d bytes", fi.Size()),
-		})
-		if fi.Size() < cfg.Checks.MinSizeBytes {
-			return nil, fmt.Errorf("backup smaller than min_size_bytes (%d < %d)", fi.Size(), cfg.Checks.MinSizeBytes)
-		}
-	}
-
-	// RPO precheck: is the backup fresh, or did the backup cron silently stall?
-	if cfg.Checks.RPOTargetDuration > 0 {
-		rep.RPOTargetSeconds = cfg.Checks.RPOTargetDuration.Seconds()
-		met := !backupTime.IsZero() && time.Since(backupTime) <= cfg.Checks.RPOTargetDuration
-		rep.RPOMet = &met
-		res := report.CheckResult{Name: fmt.Sprintf("precheck: RPO target met (backup fresher than %s)", cfg.Checks.RPOTargetDuration)}
-		if backupTime.IsZero() {
-			res.Details = "backup timestamp could not be determined"
-		} else {
-			res.Details = fmt.Sprintf("backup is %s old", time.Since(backupTime).Round(time.Second))
-		}
-		res.Passed = met
-		rep.Checks = append(rep.Checks, res)
-		if !met {
-			return nil, fmt.Errorf("RPO target check failed: %s", res.Details)
-		}
-	}
-
-	if cfg.Backup.Format == "pg_dump_sql" &&
-		(cfg.Checks.ArchiveIntegrity == nil || *cfg.Checks.ArchiveIntegrity) {
-		tail, terr := readTail(fr.localPath, tailReadBytes)
-		complete := terr == nil && backupformat.Complete(cfg.Backup.Format, tail)
-		res := report.CheckResult{Name: "precheck: dump file complete (trailer present)", Passed: complete}
-		if !complete {
-			if terr != nil {
-				res.Details = terr.Error()
-			} else {
-				res.Details = "no completion trailer found in file tail"
-			}
-		}
-		rep.Checks = append(rep.Checks, res)
-		if !complete {
-			return nil, fmt.Errorf("dump completeness check failed: %s", res.Details)
-		}
+	if err := precheckBackupFile(cfg, rep, fr); err != nil {
+		return nil, err
 	}
 
 	sb := newSandbox(postgresEngine, cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration, nil)
@@ -255,6 +198,73 @@ func restorePgDump(cfg *config.Config, rep *report.Report) (*sandbox, error) {
 	rep.RestoreFinishedAt = report.Now()
 
 	return sb, nil
+}
+
+func precheckBackupFile(cfg *config.Config, rep *report.Report, fr fetchResult) error {
+	fi, err := os.Stat(fr.localPath)
+	if err != nil {
+		return fmt.Errorf("backup not found: %w", err)
+	}
+	rep.BackupSizeBytes = fi.Size()
+
+	// Prefer the source's own timestamp over local mtime, which is only
+	// "when we downloaded it".
+	backupTime := fr.timestamp
+	if backupTime.IsZero() {
+		backupTime = fi.ModTime()
+	}
+	if !backupTime.IsZero() {
+		rep.BackupTimestamp = report.At(backupTime)
+		rep.BackupAgeSeconds = time.Since(backupTime).Seconds()
+	}
+
+	if cfg.Checks.MinSizeBytes > 0 {
+		rep.Checks = append(rep.Checks, report.CheckResult{
+			Name:    fmt.Sprintf("precheck: backup at least %d bytes", cfg.Checks.MinSizeBytes),
+			Passed:  fi.Size() >= cfg.Checks.MinSizeBytes,
+			Details: fmt.Sprintf("backup is %d bytes", fi.Size()),
+		})
+		if fi.Size() < cfg.Checks.MinSizeBytes {
+			return fmt.Errorf("backup smaller than min_size_bytes (%d < %d)", fi.Size(), cfg.Checks.MinSizeBytes)
+		}
+	}
+
+	// RPO precheck: is the backup fresh, or did the backup cron silently stall?
+	if cfg.Checks.RPOTargetDuration > 0 {
+		rep.RPOTargetSeconds = cfg.Checks.RPOTargetDuration.Seconds()
+		met := !backupTime.IsZero() && time.Since(backupTime) <= cfg.Checks.RPOTargetDuration
+		rep.RPOMet = &met
+		res := report.CheckResult{Name: fmt.Sprintf("precheck: RPO target met (backup fresher than %s)", cfg.Checks.RPOTargetDuration)}
+		if backupTime.IsZero() {
+			res.Details = "backup timestamp could not be determined"
+		} else {
+			res.Details = fmt.Sprintf("backup is %s old", time.Since(backupTime).Round(time.Second))
+		}
+		res.Passed = met
+		rep.Checks = append(rep.Checks, res)
+		if !met {
+			return fmt.Errorf("RPO target check failed: %s", res.Details)
+		}
+	}
+
+	if backupformat.Trailerable(cfg.Backup.Format) &&
+		(cfg.Checks.ArchiveIntegrity == nil || *cfg.Checks.ArchiveIntegrity) {
+		tail, terr := readTail(fr.localPath, tailReadBytes)
+		complete := terr == nil && backupformat.Complete(cfg.Backup.Format, tail)
+		res := report.CheckResult{Name: "precheck: dump file complete (trailer present)", Passed: complete}
+		if !complete {
+			if terr != nil {
+				res.Details = terr.Error()
+			} else {
+				res.Details = "no completion trailer found in file tail"
+			}
+		}
+		rep.Checks = append(rep.Checks, res)
+		if !complete {
+			return fmt.Errorf("dump completeness check failed: %s", res.Details)
+		}
+	}
+	return nil
 }
 
 func fail(rep *report.Report, cfg config.Checks, err error) (*report.Report, error) {
