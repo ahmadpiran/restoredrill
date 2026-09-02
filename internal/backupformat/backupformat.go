@@ -18,6 +18,7 @@ type Format struct {
 var known = map[string]Format{
 	"pg_dump_custom":      {Sniff: sniffPgDumpCustom},
 	"pg_dump_sql":         {Trailer: trailerPgDumpSQL},
+	"mysqldump_sql":       {Trailer: trailerMysqldumpSQL},
 	"pgbackrest":          {},
 	"existing_connection": {},
 }
@@ -32,6 +33,12 @@ const pgDumpSQLTrailerMarker = "-- PostgreSQL database dump complete"
 
 func trailerPgDumpSQL(tail []byte) bool {
 	return bytes.Contains(tail, []byte(pgDumpSQLTrailerMarker))
+}
+
+const mysqldumpSQLTrailerMarker = "-- Dump completed"
+
+func trailerMysqldumpSQL(tail []byte) bool {
+	return bytes.Contains(tail, []byte(mysqldumpSQLTrailerMarker))
 }
 
 func Valid(name string) bool {
