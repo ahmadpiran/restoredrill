@@ -22,7 +22,7 @@ func TestEvaluateAssertion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := evaluateAssertion("my check", tc.out, tc.err)
+			res := evaluateAssertion(postgresEngine, "my check", tc.out, tc.err)
 			if res.Passed != tc.wantPassed {
 				t.Errorf("evaluateAssertion(%q, %v).Passed = %v, want %v (details: %s)", tc.out, tc.err, res.Passed, tc.wantPassed, res.Details)
 			}
@@ -31,7 +31,7 @@ func TestEvaluateAssertion(t *testing.T) {
 }
 
 func TestEvaluateAssertionMultiStatementDetailsAreHonest(t *testing.T) {
-	res := evaluateAssertion("my check", "t\nf", nil)
+	res := evaluateAssertion(postgresEngine, "my check", "t\nf", nil)
 	if res.Passed {
 		t.Fatal("expected multi-line output to fail")
 	}
@@ -55,7 +55,7 @@ func TestEvaluateAssertionNeverLeaksRowContent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := evaluateAssertion("my check", tc.out, nil)
+			res := evaluateAssertion(postgresEngine, "my check", tc.out, nil)
 			if res.Passed {
 				t.Fatal("expected non-boolean output to fail")
 			}

@@ -3,7 +3,6 @@ package drill
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -17,6 +16,8 @@ type sandbox struct {
 	readyTimeout time.Duration
 	mounts       []mount
 	created      bool // true once "docker run" has actually created the container
+	eng          engine
+	database     string
 	// dsn set: existing_connection. query/queryAs run psql on the host
 	// against it instead of docker exec; exec is never called.
 	dsn string
@@ -27,18 +28,19 @@ type mount struct {
 	containerPath string
 }
 
-func newSandbox(image string, readyTimeout time.Duration, mounts []mount) *sandbox {
+func newSandbox(eng engine, image string, readyTimeout time.Duration, mounts []mount) *sandbox {
 	return &sandbox{
 		name:         fmt.Sprintf("restoredrill-%d", time.Now().UnixNano()),
 		image:        image,
 		readyTimeout: readyTimeout,
 		mounts:       mounts,
+		eng:          eng,
 	}
 }
 
 // created stays false: there is no container to clean up.
 func newExistingConnectionSandbox(dsn string) *sandbox {
-	return &sandbox{dsn: dsn}
+	return &sandbox{dsn: dsn, eng: postgresEngine}
 }
 
 func (s *sandbox) mountArgs() []string {
@@ -124,6 +126,14 @@ func (s *sandbox) exec(args ...string) (string, error) {
 	return run(append([]string{"docker", "exec", s.name}, args...)...)
 }
 
+func (s *sandbox) execEnv(env []string, args ...string) (string, error) {
+	cmd := []string{"docker", "exec"}
+	for _, e := range env {
+		cmd = append(cmd, "-e", e)
+	}
+	return run(append(append(cmd, s.name), args...)...)
+}
+
 func (s *sandbox) execAsUser(user string, args ...string) (string, error) {
 	return run(append([]string{"docker", "exec", "-u", user, s.name}, args...)...)
 }
@@ -141,39 +151,11 @@ func (s *sandbox) query(sql string) (string, error) {
 	return s.queryAs("", sql)
 }
 
-// queryAs prefixes sql with "SET ROLE role" so it runs as role instead of
-// postgres (a superuser can SET ROLE without a membership check). -q
-// suppresses the "SET" status line psql would otherwise print ahead of the
-// result, even under -t.
+// queryAs runs sql as role instead of the sandbox superuser, if the engine
+// supports it.
 func (s *sandbox) queryAs(role, sql string) (string, error) {
-	var args []string
-	if s.dsn == "" {
-		args = []string{"-U", "postgres", "-d", "postgres", "-t", "-A"}
-	} else {
-		args = []string{"-d", s.dsn, "-t", "-A"}
-	}
-	if role != "" {
-		args = append(args, "-q")
-		sql = fmt.Sprintf("SET ROLE %s; %s", quoteSingleIdent(role), sql)
-	}
-	args = append(args, "-c", sql)
-	out, err := s.runPsql(args...)
+	out, err := s.eng.query(s, role, sql)
 	return strings.TrimSpace(out), err
-}
-
-// runPsql runs psql inside the sandbox container, or, when s.dsn is set
-// (existing_connection), directly on the host against the target. The
-// host path enforces a connect timeout and a read-only session:
-// restoredrill is a guest on that database, never the owner.
-func (s *sandbox) runPsql(args ...string) (string, error) {
-	if s.dsn == "" {
-		return s.exec(append([]string{"psql"}, args...)...)
-	}
-	env := append(os.Environ(),
-		"PGCONNECT_TIMEOUT=10",
-		"PGOPTIONS=-c default_transaction_read_only=on",
-	)
-	return runEnv(env, append([]string{"psql"}, args...)...)
 }
 
 func run(args ...string) (string, error) {

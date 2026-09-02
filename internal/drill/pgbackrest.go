@@ -24,7 +24,7 @@ func restorePgbackrest(cfg *config.Config, rep *report.Report) (*sandbox, error)
 		mounts = append(mounts, mount{hostPath: cfg.Backup.PgbackrestRepoPath, containerPath: pgbackrestRepoPath})
 	}
 
-	sb := newSandbox(cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration, mounts)
+	sb := newSandbox(postgresEngine, cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration, mounts)
 	if err := sb.startUninitialized(); err != nil {
 		return sb, err
 	}

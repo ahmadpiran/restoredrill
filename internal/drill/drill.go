@@ -188,7 +188,7 @@ func restorePgDump(cfg *config.Config, rep *report.Report) (*sandbox, error) {
 		}
 	}
 
-	sb := newSandbox(cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration, nil)
+	sb := newSandbox(postgresEngine, cfg.Postgres.Image, cfg.Sandbox.ReadyTimeoutDuration, nil)
 	if err := sb.start(); err != nil {
 		return sb, err
 	}
@@ -644,8 +644,7 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 	var results []report.CheckResult
 
 	if cfg.MinTables > 0 {
-		out, err := sb.query(
-			"SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')")
+		out, err := sb.query(sb.eng.minTablesSQL(sb.database))
 		n, _ := strconv.Atoi(out)
 		results = append(results, report.CheckResult{
 			Name:    fmt.Sprintf("at least %d tables restored", cfg.MinTables),
@@ -667,7 +666,7 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 	}
 
 	for _, rc := range cfg.RowCounts {
-		out, err := sb.queryAs(cfg.VerifyAsRole, "SELECT count(*) FROM "+quoteIdent(rc.Table))
+		out, err := sb.queryAs(cfg.VerifyAsRole, "SELECT count(*) FROM "+sb.eng.quoteIdent(rc.Table))
 		n, _ := strconv.ParseInt(out, 10, 64)
 		res := report.CheckResult{
 			Name:   fmt.Sprintf("%s has at least %d rows", rc.Table, rc.Min),
@@ -692,12 +691,12 @@ func runChecks(sb *sandbox, cfg config.Checks) []report.CheckResult {
 // role if set (see queryAs).
 func runAssertion(sb *sandbox, role string, q config.Assertion) report.CheckResult {
 	out, err := sb.queryAs(role, q.SQL)
-	return evaluateAssertion(q.Name, out, err)
+	return evaluateAssertion(sb.eng, q.Name, out, err)
 }
 
 // evaluateAssertion interprets one assertion query's output. Must be
 // exactly one row with a single boolean value.
-func evaluateAssertion(name, out string, err error) report.CheckResult {
+func evaluateAssertion(e engine, name, out string, err error) report.CheckResult {
 	res := report.CheckResult{Name: name}
 	if err != nil {
 		res.Details = "query failed: " + firstLine(out)
@@ -709,8 +708,13 @@ func evaluateAssertion(name, out string, err error) report.CheckResult {
 		res.Details = fmt.Sprintf("query returned %d lines, expected exactly one boolean (check for multiple statements or a trailing semicolon; row content omitted from report)", len(lines))
 		return res
 	}
-	if lines[0] != "t" && lines[0] != "true" {
+	val, ok := e.parseBool(lines[0])
+	if !ok {
 		res.Details = "query returned a non-boolean value, expected a boolean (value omitted from report)"
+		return res
+	}
+	if !val {
+		res.Details = "query returned false"
 		return res
 	}
 	res.Passed = true

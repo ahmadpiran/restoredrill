@@ -14,7 +14,7 @@ func TestSequenceIntegrityCheck(t *testing.T) {
 		t.Skipf("docker not available, skipping integration test: %v: %s", err, firstLine(out))
 	}
 
-	sb := newSandbox("postgres:16", 120*time.Second, nil)
+	sb := newSandbox(postgresEngine, "postgres:16", 120*time.Second, nil)
 	if err := sb.start(); err != nil {
 		t.Fatalf("starting sandbox: %v", err)
 	}

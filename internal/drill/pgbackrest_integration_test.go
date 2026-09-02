@@ -30,7 +30,7 @@ func TestPgbackrestRestore(t *testing.T) {
 		t.Fatalf("writing pgbackrest.conf: %v", err)
 	}
 
-	src := newSandbox(pgbackrestTestImage, 2*time.Minute, []mount{
+	src := newSandbox(postgresEngine, pgbackrestTestImage, 2*time.Minute, []mount{
 		{hostPath: repoDir, containerPath: pgbackrestRepoPath},
 		{hostPath: confPath, containerPath: pgbackrestConfigPath},
 	})
