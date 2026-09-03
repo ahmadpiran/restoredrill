@@ -1,0 +1,47 @@
+# restoredrill: MySQL example configuration
+# Run: restoredrill --config mysql.yml
+#
+# Produce the dump with mysqldump, plain SQL, not compressed:
+#
+#   mysqldump --routines --triggers --events --databases appdb > appdb.sql
+#
+# restoredrill starts a throwaway mysql:8 container, creates mysql.database,
+# loads the dump into it, and runs your checks against that one database.
+
+backup:
+  source: ./appdb.sql
+  format: mysqldump_sql
+  # A prefix source needs a pattern. Plain SQL has no header to recognise a
+  # dump by, so restoredrill will not guess which object is the backup.
+  # source: s3://my-bucket/mysql/
+  # s3_object_pattern: "*.sql"
+
+mysql:
+  image: mysql:8
+  # Required. Every check runs against this database, and the dump is loaded
+  # into it. Use the same name the dump was taken from.
+  database: appdb
+
+# Not applicable to this format and rejected at config load if set:
+# backup.globals_source, checks.verify_as_role, checks.sequence_integrity.
+# mysqldump does not dump users, sequences are a Postgres concept, and MySQL
+# SET ROLE cannot drop the connecting account's own privileges, so checking
+# as a role would still run with full rights.
+
+checks:
+  min_tables: 5
+  # Catches objects a clean restore leaves broken: a view, trigger, event or
+  # routine whose DEFINER account does not exist here, because mysqldump
+  # never dumped it. Those load without error and fail when first invoked.
+  definer_integrity: true
+  row_counts:
+    - table: users
+      min: 100
+  queries:
+    - name: orders reference valid users
+      sql: "SELECT NOT EXISTS (SELECT 1 FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE u.id IS NULL)"
+  rpo_target: 24h
+  rto_target: 30m
+
+report:
+  path: restoredrill-report.json
