@@ -1,5 +1,5 @@
 name: 'restoredrill'
-description: 'Run a restoredrill PostgreSQL restore drill and produce a JSON evidence report.'
+description: 'Run a restoredrill restore drill on a PostgreSQL or MySQL backup and write a JSON evidence report.'
 author: 'restoredrill'
 branding:
   icon: 'shield'
@@ -43,13 +43,6 @@ runs:
       uses: actions/setup-go@v5
       with:
         go-version: 'stable'
-
-    - name: Configure Go for private module access
-      shell: bash
-      run: |
-        set -euo pipefail
-        git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
-        echo "GOPRIVATE=github.com/ahmadpiran/restoredrill" >> "$GITHUB_ENV"
 
     - name: Install restoredrill
       shell: bash
