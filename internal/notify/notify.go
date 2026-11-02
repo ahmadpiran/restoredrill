@@ -4,8 +4,10 @@ package notify
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strings"
 	"time"
@@ -84,6 +86,12 @@ func post(url, contentType string, body []byte) error {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(url, contentType, bytes.NewReader(body))
 	if err != nil {
+		// url.Error embeds the full URL, and webhook URLs carry secrets that
+		// would otherwise land in the report file.
+		var uerr *neturl.Error
+		if errors.As(err, &uerr) {
+			return uerr.Err
+		}
 		return err
 	}
 	defer resp.Body.Close()
