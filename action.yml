@@ -11,7 +11,7 @@ inputs:
     required: false
     default: 'restoredrill.yml'
   version:
-    description: 'restoredrill version to install: a git tag (e.g. "v0.2.0"), or "latest".'
+    description: 'restoredrill release to install: a tag (e.g. "v0.4.0"), or "latest".'
     required: false
     default: 'latest'
   trigger:
@@ -39,25 +39,68 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: 'stable'
-
     - name: Install restoredrill
       shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        go install "github.com/ahmadpiran/restoredrill/cmd/restoredrill@${{ inputs.version }}"
-        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+        repo="ahmadpiran/restoredrill"
+
+        case "$RUNNER_OS" in
+          Linux) os=linux ;;
+          macOS) os=darwin ;;
+          *) echo "restoredrill: unsupported runner OS $RUNNER_OS, use a Linux or macOS runner" >&2; exit 1 ;;
+        esac
+        case "$RUNNER_ARCH" in
+          X64) arch=amd64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "restoredrill: unsupported runner architecture $RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+
+        tag="$VERSION"
+        if [ "$tag" = "latest" ]; then
+          tag="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")"
+          tag="${tag##*/}"
+        fi
+        asset="restoredrill_${tag#v}_${os}_${arch}.tar.gz"
+        base="https://github.com/$repo/releases/download/$tag"
+
+        dir="$RUNNER_TEMP/restoredrill-bin"
+        mkdir -p "$dir"
+        curl -fsSL -o "$dir/$asset" "$base/$asset"
+        curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
+
+        expected="$(grep " $asset\$" "$dir/checksums.txt" | cut -d' ' -f1)"
+        if [ -z "$expected" ]; then
+          echo "restoredrill: no checksum listed for $asset" >&2
+          exit 1
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          actual="$(sha256sum "$dir/$asset" | cut -d' ' -f1)"
+        else
+          actual="$(shasum -a 256 "$dir/$asset" | cut -d' ' -f1)"
+        fi
+        if [ "$expected" != "$actual" ]; then
+          echo "restoredrill: checksum mismatch for $asset" >&2
+          exit 1
+        fi
+
+        (cd "$dir" && tar -xzf "$asset" restoredrill)
+        chmod +x "$dir/restoredrill"
+        echo "$dir" >> "$GITHUB_PATH"
 
     - name: Run restoredrill
       shell: bash
+      env:
+        CONFIG: ${{ inputs.config }}
+        TRIGGER: ${{ inputs.trigger }}
+        TRIGGERED_BY: ${{ inputs.triggered-by }}
       run: |
         set -euo pipefail
-        args=(--config "${{ inputs.config }}" --trigger "${{ inputs.trigger }}")
-        if [ -n "${{ inputs.triggered-by }}" ]; then
-          args+=(--triggered-by "${{ inputs.triggered-by }}")
+        args=(--config "$CONFIG" --trigger "$TRIGGER")
+        if [ -n "$TRIGGERED_BY" ]; then
+          args+=(--triggered-by "$TRIGGERED_BY")
         fi
         restoredrill "${args[@]}"
 
