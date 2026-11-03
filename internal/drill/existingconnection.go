@@ -63,20 +63,99 @@ func restoreExistingConnection(cfg *config.Config, rep *report.Report) (*sandbox
 func redactDSN(dsn string) string {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		u, err := url.Parse(dsn)
-		if err != nil {
+		// A raw "?", "#" or "/" in a password makes the parser read part of it
+		// as the host, query or fragment. libpq URIs never carry a fragment.
+		if err != nil || u.Fragment != "" || (u.User == nil && strings.Contains(dsn, "@")) {
 			return "postgres://[redacted: unparseable]"
 		}
 		if u.User != nil {
 			u.User = url.User(u.User.Username())
 		}
+		u.RawQuery = dropSecretParams(u.RawQuery)
 		return u.String()
 	}
+	out, ok := redactKeywordDSN(dsn)
+	if !ok {
+		return "[redacted: unparseable]"
+	}
+	return out
+}
+
+func isSecretKey(k string) bool {
+	k = strings.ToLower(k)
+	return k == "password" || k == "sslpassword"
+}
+
+// dropSecretParams removes secret parameters from a URI query, keeping the
+// order and escaping of everything else.
+func dropSecretParams(query string) string {
 	var kept []string
-	for _, tok := range strings.Fields(dsn) {
-		if strings.HasPrefix(strings.ToLower(tok), "password=") {
+	for _, pair := range strings.Split(query, "&") {
+		key, _, _ := strings.Cut(pair, "=")
+		if k, err := url.QueryUnescape(key); err == nil && isSecretKey(k) {
 			continue
 		}
-		kept = append(kept, tok)
+		kept = append(kept, pair)
 	}
-	return strings.Join(kept, " ")
+	return strings.Join(kept, "&")
 }
+
+// redactKeywordDSN drops password and sslpassword from a libpq "key=value"
+// string. It follows libpq's rules: spaces are allowed around "=", and a value
+// may be single-quoted with backslash escapes. ok is false when the string
+// does not parse, in which case nothing of it should be shown.
+func redactKeywordDSN(dsn string) (out string, ok bool) {
+	var kept []string
+	i := 0
+	for {
+		for i < len(dsn) && isSpace(dsn[i]) {
+			i++
+		}
+		if i == len(dsn) {
+			return strings.Join(kept, " "), true
+		}
+		start := i
+		for i < len(dsn) && dsn[i] != '=' && !isSpace(dsn[i]) {
+			i++
+		}
+		key := dsn[start:i]
+		for i < len(dsn) && isSpace(dsn[i]) {
+			i++
+		}
+		if key == "" || i == len(dsn) || dsn[i] != '=' {
+			return "", false
+		}
+		i++
+		for i < len(dsn) && isSpace(dsn[i]) {
+			i++
+		}
+		if i < len(dsn) && dsn[i] == '\'' {
+			i++
+			for i < len(dsn) && dsn[i] != '\'' {
+				if dsn[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			if i >= len(dsn) {
+				return "", false
+			}
+			i++
+		} else {
+			for i < len(dsn) && !isSpace(dsn[i]) {
+				if dsn[i] == '\\' {
+					i++
+				}
+				i++
+			}
+		}
+		if i > len(dsn) {
+			return "", false
+		}
+		if !isSecretKey(key) {
+			kept = append(kept, dsn[start:i])
+		}
+	}
+}
+
+func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }

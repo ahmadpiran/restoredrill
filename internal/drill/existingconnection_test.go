@@ -34,3 +34,52 @@ func TestRedactDSNNoPasswordUnaffected(t *testing.T) {
 		t.Errorf("expected DSN preserved, got %q", got)
 	}
 }
+
+func TestRedactDSNNeverLeaksAPassword(t *testing.T) {
+	for _, dsn := range []string{
+		"postgres://u:SECRET@h/db",
+		"postgres://u@h/db?password=SECRET",
+		"postgres://u@h/db?sslmode=require&password=SECRET&application_name=x",
+		"postgres://u@h/db?sslpassword=SECRET",
+		"postgres://u@h/db?PASSWORD=SECRET",
+		"postgres://h/db?user=u&password=SECRET",
+		"host=h user=u password=SECRET dbname=d",
+		"host=h user=u password = SECRET",
+		"host=h user=u password= SECRET",
+		"host=h user=u PASSWORD=SECRET",
+		"host=h user=u password='SECRET'",
+		"host=h user=u password='two SECRET words'",
+		`host=h user=u password='it\'s SECRET'`,
+		`host=h user=u password=SE\ CRET`,
+		"host=h user=u sslpassword=SECRET",
+		"host=h user=u password='SECRET",
+		"host=h user=u password",
+		"postgres://u:SE#CRET@h/db",
+		"postgres://u:12#SECRET@h/db",
+		"postgres://u:12?SECRET@h/db",
+		"postgres://u:12/SECRET@h/db",
+	} {
+		got := redactDSN(dsn)
+		for _, leak := range []string{"SECRET", "CRET", "two", "words", `it\'s`} {
+			if strings.Contains(got, leak) {
+				t.Errorf("redactDSN(%q) = %q leaks %q", dsn, got, leak)
+			}
+		}
+	}
+}
+
+func TestRedactDSNKeepsTheRest(t *testing.T) {
+	cases := map[string]string{
+		"postgres://u:pw@h:5432/db?sslmode=require&password=x&application_name=drill": "postgres://u@h:5432/db?sslmode=require&application_name=drill",
+		"host=h port=5432 user=u password = x dbname='my db' sslmode=require":         "host=h port=5432 user=u dbname='my db' sslmode=require",
+		"host=h user=u":                        "host=h user=u",
+		"postgres://u@h/db":                    "postgres://u@h/db",
+		"host=h user=u password='unterminated": "[redacted: unparseable]",
+		"host=h user=u dangling":               "[redacted: unparseable]",
+	}
+	for in, want := range cases {
+		if got := redactDSN(in); got != want {
+			t.Errorf("redactDSN(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
