@@ -83,3 +83,50 @@ func TestRedactDSNKeepsTheRest(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitDSNPassword(t *testing.T) {
+	cases := []struct{ in, wantDSN, wantPW string }{
+		{"postgres://u:s3cr3t@h:5432/db?sslmode=require", "postgres://u@h:5432/db?sslmode=require", "s3cr3t"},
+		{"postgres://u:p%40ss%2Fword@h/db", "postgres://u@h/db", "p@ss/word"},
+		{"postgres://u@h/db?password=s3cr3t&sslmode=require", "postgres://u@h/db?sslmode=require", "s3cr3t"},
+		{"host=h user=u password=s3cr3t dbname=d", "host=h user=u dbname=d", "s3cr3t"},
+		{"host=h user=u password = s3cr3t", "host=h user=u", "s3cr3t"},
+		{"host=h user=u password='two words'", "host=h user=u", "two words"},
+		{`host=h user=u password='it\'s here'`, "host=h user=u", "it's here"},
+		{`host=h user=u password=a\ b`, "host=h user=u", "a b"},
+		{"host=h user=u sslpassword=keep password=s3cr3t", "host=h user=u sslpassword=keep", "s3cr3t"},
+		{"postgres://u@h/db", "postgres://u@h/db", ""},
+		{"host=h user=u", "host=h user=u", ""},
+	}
+	for _, c := range cases {
+		gotDSN, gotPW := splitDSNPassword(c.in)
+		if gotDSN != c.wantDSN || gotPW != c.wantPW {
+			t.Errorf("splitDSNPassword(%q) = (%q, %q), want (%q, %q)", c.in, gotDSN, gotPW, c.wantDSN, c.wantPW)
+		}
+	}
+}
+
+func TestSplitDSNPasswordLeavesUnparseableDSNsAsTheyWere(t *testing.T) {
+	for _, in := range []string{"postgres://u:12#34@h/db", "host=h password='unterminated", "host=h dangling"} {
+		if gotDSN, gotPW := splitDSNPassword(in); gotDSN != in || gotPW != "" {
+			t.Errorf("splitDSNPassword(%q) = (%q, %q), want it unchanged", in, gotDSN, gotPW)
+		}
+	}
+}
+
+func TestExistingConnectionPsqlGetsThePasswordFromTheEnvironment(t *testing.T) {
+	sb := newExistingConnectionSandbox("postgres://u:s3cr3t@h/db?sslmode=disable")
+	if strings.Contains(sb.dsn, "s3cr3t") {
+		t.Fatalf("password stays in the psql argument: %q", sb.dsn)
+	}
+	found := false
+	for _, e := range sb.hostPsqlEnv() {
+		found = found || e == "PGPASSWORD=s3cr3t"
+	}
+	if !found {
+		t.Error("PGPASSWORD not set for psql")
+	}
+	if env := newExistingConnectionSandbox("postgres://u@h/db").hostPsqlEnv(); strings.Contains(strings.Join(env, "\n")+"\n", "\nPGPASSWORD=s3cr3t") {
+		t.Error("password leaked between sandboxes")
+	}
+}

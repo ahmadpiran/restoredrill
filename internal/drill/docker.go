@@ -18,9 +18,9 @@ type sandbox struct {
 	created      bool // true once "docker run" has actually created the container
 	eng          engine
 	database     string
-	// dsn set: existing_connection. query/queryAs run psql on the host
-	// against it instead of docker exec; exec is never called.
 	dsn string
+	// Goes to psql as PGPASSWORD: a command line is readable by every local user.
+	dsnPassword string
 }
 
 type mount struct {
@@ -46,7 +46,8 @@ func newMySQLSandbox(image, database string, readyTimeout time.Duration) *sandbo
 
 // created stays false: there is no container to clean up.
 func newExistingConnectionSandbox(dsn string) *sandbox {
-	return &sandbox{dsn: dsn, eng: postgresEngine}
+	clean, password := splitDSNPassword(dsn)
+	return &sandbox{dsn: clean, dsnPassword: password, eng: postgresEngine}
 }
 
 func (s *sandbox) mountArgs() []string {

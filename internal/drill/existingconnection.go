@@ -57,15 +57,10 @@ func restoreExistingConnection(cfg *config.Config, rep *report.Report) (*sandbox
 	return sb, nil
 }
 
-// redactDSN is the one place restoredrill parses connection_dsn: never for
-// connection logic, only to strip a password before it reaches a report (and
-// therefore notify.webhook_url).
 func redactDSN(dsn string) string {
-	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		u, err := url.Parse(dsn)
-		// A raw "?", "#" or "/" in a password makes the parser read part of it
-		// as the host, query or fragment. libpq URIs never carry a fragment.
-		if err != nil || u.Fragment != "" || (u.User == nil && strings.Contains(dsn, "@")) {
+	if isURIDSN(dsn) {
+		u, ok := parseURIDSN(dsn)
+		if !ok {
 			return "postgres://[redacted: unparseable]"
 		}
 		if u.User != nil {
@@ -74,11 +69,71 @@ func redactDSN(dsn string) string {
 		u.RawQuery = dropSecretParams(u.RawQuery)
 		return u.String()
 	}
-	out, ok := redactKeywordDSN(dsn)
+	pairs, ok := parseKeywordDSN(dsn)
 	if !ok {
 		return "[redacted: unparseable]"
 	}
-	return out
+	var kept []string
+	for _, p := range pairs {
+		if !isSecretKey(p.key) {
+			kept = append(kept, p.text)
+		}
+	}
+	return strings.Join(kept, " ")
+}
+
+func splitDSNPassword(dsn string) (clean, password string) {
+	if isURIDSN(dsn) {
+		u, ok := parseURIDSN(dsn)
+		if !ok {
+			return dsn, ""
+		}
+		if u.User != nil {
+			if pw, set := u.User.Password(); set {
+				password = pw
+			}
+			u.User = url.User(u.User.Username())
+		}
+		var kept []string
+		for _, pair := range strings.Split(u.RawQuery, "&") {
+			key, val, _ := strings.Cut(pair, "=")
+			if k, err := url.QueryUnescape(key); err == nil && k == "password" {
+				if v, err := url.QueryUnescape(val); err == nil {
+					password = v
+					continue
+				}
+			}
+			kept = append(kept, pair)
+		}
+		u.RawQuery = strings.Join(kept, "&")
+		return u.String(), password
+	}
+	pairs, ok := parseKeywordDSN(dsn)
+	if !ok {
+		return dsn, ""
+	}
+	var kept []string
+	for _, p := range pairs {
+		if p.key == "password" {
+			password = p.value
+			continue
+		}
+		kept = append(kept, p.text)
+	}
+	return strings.Join(kept, " "), password
+}
+
+func isURIDSN(dsn string) bool {
+	return strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://")
+}
+
+func parseURIDSN(dsn string) (*url.URL, bool) {
+	u, err := url.Parse(dsn)
+	// A raw "?", "#" or "/" in a password shifts part of it into the host, query or fragment.
+	if err != nil || u.Fragment != "" || (u.User == nil && strings.Contains(dsn, "@")) {
+		return nil, false
+	}
+	return u, true
 }
 
 func isSecretKey(k string) bool {
@@ -86,8 +141,7 @@ func isSecretKey(k string) bool {
 	return k == "password" || k == "sslpassword"
 }
 
-// dropSecretParams removes secret parameters from a URI query, keeping the
-// order and escaping of everything else.
+// Not url.Values: that would reorder and re-escape everything else.
 func dropSecretParams(query string) string {
 	var kept []string
 	for _, pair := range strings.Split(query, "&") {
@@ -100,19 +154,18 @@ func dropSecretParams(query string) string {
 	return strings.Join(kept, "&")
 }
 
-// redactKeywordDSN drops password and sslpassword from a libpq "key=value"
-// string. It follows libpq's rules: spaces are allowed around "=", and a value
-// may be single-quoted with backslash escapes. ok is false when the string
-// does not parse, in which case nothing of it should be shown.
-func redactKeywordDSN(dsn string) (out string, ok bool) {
-	var kept []string
+type dsnPair struct {
+	key, text, value string
+}
+
+func parseKeywordDSN(dsn string) (pairs []dsnPair, ok bool) {
 	i := 0
 	for {
 		for i < len(dsn) && isSpace(dsn[i]) {
 			i++
 		}
 		if i == len(dsn) {
-			return strings.Join(kept, " "), true
+			return pairs, true
 		}
 		start := i
 		for i < len(dsn) && dsn[i] != '=' && !isSpace(dsn[i]) {
@@ -123,22 +176,26 @@ func redactKeywordDSN(dsn string) (out string, ok bool) {
 			i++
 		}
 		if key == "" || i == len(dsn) || dsn[i] != '=' {
-			return "", false
+			return nil, false
 		}
 		i++
 		for i < len(dsn) && isSpace(dsn[i]) {
 			i++
 		}
+		var value strings.Builder
 		if i < len(dsn) && dsn[i] == '\'' {
 			i++
 			for i < len(dsn) && dsn[i] != '\'' {
 				if dsn[i] == '\\' {
 					i++
 				}
+				if i < len(dsn) {
+					value.WriteByte(dsn[i])
+				}
 				i++
 			}
 			if i >= len(dsn) {
-				return "", false
+				return nil, false
 			}
 			i++
 		} else {
@@ -146,15 +203,16 @@ func redactKeywordDSN(dsn string) (out string, ok bool) {
 				if dsn[i] == '\\' {
 					i++
 				}
+				if i < len(dsn) {
+					value.WriteByte(dsn[i])
+				}
 				i++
 			}
 		}
 		if i > len(dsn) {
-			return "", false
+			return nil, false
 		}
-		if !isSecretKey(key) {
-			kept = append(kept, dsn[start:i])
-		}
+		pairs = append(pairs, dsnPair{key: key, text: dsn[start:i], value: value.String()})
 	}
 }
 

@@ -115,9 +115,16 @@ func (s *sandbox) runPsql(args ...string) (string, error) {
 	if s.dsn == "" {
 		return s.exec(append([]string{"psql"}, args...)...)
 	}
+	return runEnv(s.hostPsqlEnv(), append([]string{"psql"}, args...)...)
+}
+
+func (s *sandbox) hostPsqlEnv() []string {
 	env := append(os.Environ(),
 		"PGCONNECT_TIMEOUT=10",
 		"PGOPTIONS=-c default_transaction_read_only=on",
 	)
-	return runEnv(env, append([]string{"psql"}, args...)...)
+	if s.dsnPassword != "" {
+		env = append(env, "PGPASSWORD="+s.dsnPassword)
+	}
+	return env
 }
