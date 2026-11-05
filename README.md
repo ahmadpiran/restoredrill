@@ -2,7 +2,7 @@
 
 **Untested backups aren't backups.** restoredrill proves your PostgreSQL and MySQL backups actually restore. It fetches the latest backup, restores it into a throwaway container, runs checks you define, and writes a JSON report with the restore time. Or, if something else already restored a copy for you, it can just connect and run the same checks against that instead.
 
-> Status: v0.4.3, early days. Postgres, plus MySQL 8 from `mysqldump` files. Things may still change.
+> Status: v0.4.4, early days. Postgres, plus MySQL 8 from `mysqldump` files. Things may still change.
 
 ## Why
 
@@ -100,7 +100,7 @@ The exit code makes restoredrill a good fit for a scheduled CI job. See [`.githu
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: ahmadpiran/restoredrill@v0.4.3
+- uses: ahmadpiran/restoredrill@v0.4.4
   with:
     config: restoredrill.yml
 ```
