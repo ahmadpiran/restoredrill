@@ -105,6 +105,9 @@ func TestPgbackrestRestore(t *testing.T) {
 	if !rep.Passed {
 		t.Fatalf("expected the drill to pass, got checks: %+v", rep.Checks)
 	}
+	if rep.Database != "main" {
+		t.Errorf("Database = %q, want the pgBackRest stanza main", rep.Database)
+	}
 	if rep.BackupResolvedKey == "" {
 		t.Error("expected BackupResolvedKey to be set to the pgbackrest backup label")
 	}

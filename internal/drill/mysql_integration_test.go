@@ -84,6 +84,9 @@ func TestMysqlRestoreSurfacesMissingDefiner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("drill returned a fatal error, expected a completed run with one failed check: %v", err)
 	}
+	if rep.Database != "appdb" {
+		t.Errorf("Database = %q, want appdb", rep.Database)
+	}
 	if rep.MySQLImage != mysqlTestImage {
 		t.Errorf("MySQLImage = %q, want %q", rep.MySQLImage, mysqlTestImage)
 	}

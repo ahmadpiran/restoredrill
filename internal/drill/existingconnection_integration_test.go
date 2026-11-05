@@ -97,6 +97,9 @@ func TestExistingConnectionMode(t *testing.T) {
 	if !rep.Passed {
 		t.Fatalf("expected the drill to pass, got checks: %+v", rep.Checks)
 	}
+	if rep.Database != "postgres" {
+		t.Errorf("Database = %q, want postgres", rep.Database)
+	}
 	if rep.RestoreMethod != "existing_connection" {
 		t.Errorf("expected RestoreMethod %q, got %q", "existing_connection", rep.RestoreMethod)
 	}

@@ -24,6 +24,7 @@ func restoreMysqlDump(cfg *config.Config, rep *report.Report) (*sandbox, error) 
 	if err := precheckBackupFile(cfg, rep, fr); err != nil {
 		return nil, err
 	}
+	rep.Database = mysqlDumpDatabase(fr.localPath)
 
 	sb := newMySQLSandbox(cfg.MySQL.Image, cfg.MySQL.Database, cfg.Sandbox.ReadyTimeoutDuration)
 	if err := sb.startMySQL(); err != nil {

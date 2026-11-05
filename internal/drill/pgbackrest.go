@@ -29,6 +29,7 @@ func restorePgbackrest(cfg *config.Config, rep *report.Report) (*sandbox, error)
 		return sb, err
 	}
 
+	rep.Database = cfg.Backup.PgbackrestStanza
 	backup, err := pgbackrestLatestBackup(sb, cfg.Backup.PgbackrestStanza)
 	if err != nil {
 		return sb, fmt.Errorf("pgbackrest info: %w", err)

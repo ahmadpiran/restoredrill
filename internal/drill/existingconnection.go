@@ -17,6 +17,7 @@ func restoreExistingConnection(cfg *config.Config, rep *report.Report) (*sandbox
 	target := redactDSN(dsn)
 	rep.BackupSource = target
 	rep.BackupResolvedKey = target
+	rep.Database = dsnDatabase(dsn)
 
 	if _, err := exec.LookPath("psql"); err != nil {
 		return nil, fmt.Errorf("psql not found on PATH (required for backup.format existing_connection): %w", err)

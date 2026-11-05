@@ -86,6 +86,9 @@ type Report struct {
 	StartedAt  Timestamp `json:"started_at"`
 	FinishedAt Timestamp `json:"finished_at"`
 
+	// Database is the name of the protected database, or the pgBackRest
+	// stanza. Empty when the backup does not record one.
+	Database      string `json:"database"`
 	BackupSource  string `json:"backup_source"`
 	GlobalsSource string `json:"globals_source"`
 	// BackupResolvedKey is the actual file/object drilled (differs from

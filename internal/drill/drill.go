@@ -176,16 +176,20 @@ func restorePgDump(cfg *config.Config, rep *report.Report) (*sandbox, error) {
 		return sb, err
 	}
 
-	if cfg.Backup.Format == "pg_dump_custom" &&
-		(cfg.Checks.ArchiveIntegrity == nil || *cfg.Checks.ArchiveIntegrity) {
+	if cfg.Backup.Format == "pg_dump_custom" {
 		out, err := sb.exec("pg_restore", "--list", remote)
-		res := report.CheckResult{Name: "precheck: archive integrity (TOC readable)", Passed: err == nil}
-		if err != nil {
-			res.Details = firstLine(out)
+		if err == nil {
+			rep.Database = pgDumpDatabase(out)
 		}
-		rep.Checks = append(rep.Checks, res)
-		if err != nil {
-			return sb, fmt.Errorf("archive integrity check failed: %v: %s", err, firstLine(out))
+		if cfg.Checks.ArchiveIntegrity == nil || *cfg.Checks.ArchiveIntegrity {
+			res := report.CheckResult{Name: "precheck: archive integrity (TOC readable)", Passed: err == nil}
+			if err != nil {
+				res.Details = firstLine(out)
+			}
+			rep.Checks = append(rep.Checks, res)
+			if err != nil {
+				return sb, fmt.Errorf("archive integrity check failed: %v: %s", err, firstLine(out))
+			}
 		}
 	}
 
