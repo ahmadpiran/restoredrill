@@ -1,5 +1,5 @@
 name: 'restoredrill'
-description: 'Run a restoredrill restore drill on a PostgreSQL or MySQL backup and write a JSON evidence report.'
+description: 'Prove your PostgreSQL and MySQL backups restore: restore to a throwaway container, run checks, write an evidence report.'
 author: 'restoredrill'
 branding:
   icon: 'shield'
