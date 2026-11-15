@@ -94,6 +94,25 @@ restoredrill sends results to tools that you already monitor:
 
 If a notification fails to reach its destination, `notify_errors` records this, and the process exits with a non-zero code. A silent notification failure is the same problem, one step further from the source.
 
+## Hosted alerts and a monthly evidence pack (optional)
+
+The CLI is complete on its own. If you'd rather not build the alerting and record-keeping around it yourself, there is a hosted layer at [restoredrill.io](https://restoredrill.io). It is free during early access.
+
+Point `notify.webhook_url` at your private address:
+
+```yaml
+notify:
+  webhook_url: https://hooks.restoredrill.io/r/<your-token>
+```
+
+It adds:
+
+- Email and Slack alerts when a drill fails, when a database misses its schedule, and when a passing run drifts from earlier ones: a much smaller backup, fewer rows, a much slower restore, or the same old backup tested again.
+- A PDF evidence pack at the start of each month, per database, with an address where anyone can check the file is unchanged. Here is [a sample with made-up data](https://restoredrill.io/sample-pack.pdf).
+- An append-only history chained by SHA-256, and a read-only link you can give an auditor.
+
+It only receives the JSON report. It never connects to your database and never sees a backup. [Security and data](https://restoredrill.io/security) lists what a report contains and how long it is kept. To get an address, [ask on the site](https://restoredrill.io/#early-access).
+
 ## CI usage
 
 The exit code makes restoredrill a good fit for a scheduled CI job. See [`.github/workflows/restoredrill.yml`](.github/workflows/restoredrill.yml) for a working example, or use the GitHub Action in your own workflow. When a person runs restoredrill by hand, pass `--trigger manual` and `--triggered-by`. The evidence output has the same format in both cases.
